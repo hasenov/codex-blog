@@ -1,0 +1,18 @@
+{
+    "name": "@codex-blog/contracts",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "exports": {
+        ".": "./src/index.ts"
+    },
+    "scripts": {
+        "build": "tsc -p tsconfig.json",
+        "lint": "eslint src --ext .ts",
+        "test": "vitest run --passWithNoTests --pool=threads --maxWorkers=1",
+        "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "dependencies": {
+        "zod": "^3.24.2"
+    }
+}
