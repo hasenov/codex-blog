@@ -1,0 +1,66 @@
+generator client {
+    provider = "prisma-client-js"
+}
+
+datasource db {
+    provider = "sqlite"
+    url      = "file:./dev.db"
+}
+
+model User {
+    id           String   @id
+    email        String   @unique
+    displayName  String
+    role         String
+    status       String
+    passwordHash String
+    createdAt    DateTime
+    updatedAt    DateTime
+
+    sessions        Session[]
+    securityEvents  SecurityEvent[]
+    passwordResets  PasswordResetToken[]
+
+    @@map("users")
+}
+
+model Session {
+    id                  String    @id
+    userId              String
+    refreshTokenId      String    @unique
+    createdAt           DateTime
+    expiresAt           DateTime
+    revokedAt           DateTime?
+    replacedBySessionId String?
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@index([userId])
+    @@map("sessions")
+}
+
+model SecurityEvent {
+    id            String   @id
+    type          String
+    userId        String
+    occurredAt    DateTime
+    correlationId String
+    metadataJson  String?
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@index([userId])
+    @@map("security_events")
+}
+
+model PasswordResetToken {
+    token     String   @id
+    userId    String
+    expiresAt DateTime
+    createdAt DateTime @default(now())
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@index([userId])
+    @@map("password_reset_tokens")
+}

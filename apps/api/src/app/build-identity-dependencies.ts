@@ -15,6 +15,7 @@ import {
 import type { AppConfig } from '@codex-blog/config';
 import {
     ConsoleNotificationPort,
+    createPrismaClient,
     HmacTokenService,
     InMemoryPasswordResetTokenStore,
     InMemorySecurityEventRepository,
@@ -22,6 +23,10 @@ import {
     InMemoryTransactionManager,
     InMemoryUserRepository,
     NoopLogger,
+    PrismaPasswordResetTokenStore,
+    PrismaSecurityEventRepository,
+    PrismaSessionRepository,
+    PrismaUserRepository,
     RandomIdGenerator,
     ScryptPasswordHasher,
     SystemClock,
@@ -36,9 +41,14 @@ class RequestCorrelationIdProvider implements CorrelationIdProvider {
 }
 
 export const buildIdentityDependencies = (config: AppConfig, getCurrentCorrelationId: () => string) => {
-    const userRepository = new InMemoryUserRepository();
-    const sessionRepository = new InMemorySessionRepository();
-    const securityEventRepository = new InMemorySecurityEventRepository();
+    const prisma = config.DATA_SOURCE === 'prisma' ? createPrismaClient(config.DATABASE_URL) : undefined;
+    const userRepository = prisma === undefined ? new InMemoryUserRepository() : new PrismaUserRepository(prisma);
+    const sessionRepository =
+        prisma === undefined ? new InMemorySessionRepository() : new PrismaSessionRepository(prisma);
+    const securityEventRepository =
+        prisma === undefined ? new InMemorySecurityEventRepository() : new PrismaSecurityEventRepository(prisma);
+    const passwordResetTokenStore =
+        prisma === undefined ? new InMemoryPasswordResetTokenStore() : new PrismaPasswordResetTokenStore(prisma);
 
     const commonDependencies = {
         userRepository,
@@ -56,7 +66,7 @@ export const buildIdentityDependencies = (config: AppConfig, getCurrentCorrelati
         logger: new NoopLogger(),
         correlationIdProvider: new RequestCorrelationIdProvider(getCurrentCorrelationId),
         transactionManager: new InMemoryTransactionManager(),
-        passwordResetTokenStore: new InMemoryPasswordResetTokenStore(),
+        passwordResetTokenStore,
         notificationPort: new ConsoleNotificationPort(),
         refreshTokenTtlDays: config.REFRESH_TOKEN_TTL_DAYS,
     };
@@ -74,5 +84,8 @@ export const buildIdentityDependencies = (config: AppConfig, getCurrentCorrelati
         changeUserStatus: new ChangeUserStatusUseCase(commonDependencies),
         forgotPassword: new ForgotPasswordUseCase(commonDependencies),
         resetPassword: new ResetPasswordUseCase(commonDependencies),
+        dispose: async (): Promise<void> => {
+            await prisma?.$disconnect();
+        },
     };
 };

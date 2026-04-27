@@ -15,6 +15,7 @@ import { buildV1Router } from '../routes/v1.js';
 interface CreatedApp {
     app: Express;
     config: AppConfig;
+    dispose(): Promise<void>;
 }
 
 export const createApp = (): CreatedApp => {
@@ -39,5 +40,9 @@ export const createApp = (): CreatedApp => {
     app.use(config.API_PREFIX, buildV1Router(identity));
     app.use(errorHandler);
 
-    return { app, config };
+    return {
+        app,
+        config,
+        dispose: identity.dispose,
+    };
 };
