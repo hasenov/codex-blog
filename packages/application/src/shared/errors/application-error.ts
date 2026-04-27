@@ -16,6 +16,12 @@ export class ConflictError extends ApplicationError {
     }
 }
 
+export class BadRequestError extends ApplicationError {
+    public constructor(message: string, code = 'BAD_REQUEST') {
+        super(message, code, 400);
+    }
+}
+
 export class UnauthorizedError extends ApplicationError {
     public constructor(message: string, code = 'UNAUTHORIZED') {
         super(message, code, 401);

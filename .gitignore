@@ -8,3 +8,4 @@ coverage
 pnpm-lock.yaml
 packages/infrastructure/prisma/dev.db
 packages/infrastructure/prisma/dev.db-journal
+*.tsbuildinfo
