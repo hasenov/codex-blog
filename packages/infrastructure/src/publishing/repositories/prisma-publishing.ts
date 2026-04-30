@@ -7,6 +7,7 @@ import {
     PostTitle,
     RichContent,
     type RichContentProps,
+    type ListPublishedPostsOptions,
     SeoMetadata,
     type SeoMetadataProps,
     Slug,
@@ -128,7 +129,7 @@ export class PrismaPostRepository implements PostRepository {
         return record === null ? null : toPost(record);
     }
 
-    public async listPublished(): Promise<Post[]> {
+    public async listPublished(options: ListPublishedPostsOptions): Promise<Post[]> {
         const records = await this.prisma.post.findMany({
             where: {
                 status: 'published',
@@ -136,12 +137,13 @@ export class PrismaPostRepository implements PostRepository {
             include: {
                 revisions: true,
             },
-            orderBy: {
-                publishedAt: 'desc',
-            },
+            orderBy: [{ publishedAt: 'desc' }, { id: 'asc' }],
         });
+        const cursorIndex =
+            options.cursor === undefined ? -1 : records.findIndex((record) => record.id === options.cursor);
+        const startIndex = cursorIndex < 0 ? 0 : cursorIndex + 1;
 
-        return records.map((record) => toPost(record));
+        return records.slice(startIndex, startIndex + options.limit).map((record) => toPost(record));
     }
 
     public async save(post: Post): Promise<void> {

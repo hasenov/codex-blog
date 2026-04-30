@@ -153,7 +153,7 @@ describe('Prisma publishing repository', () => {
         await repository.save(published);
         await repository.save(scheduled);
 
-        const posts = await repository.listPublished();
+        const posts = await repository.listPublished({ limit: 20 });
 
         expect(posts.map((post) => post.slug.toString())).toEqual(['published-post']);
     });

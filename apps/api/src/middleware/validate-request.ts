@@ -19,3 +19,19 @@ export const validateBody = <T>(schema: ZodType<T>): RequestHandler => {
         }
     };
 };
+
+export const validateQuery = <T>(schema: ZodType<T>): RequestHandler => {
+    return (request: Request, _response: Response, next: NextFunction) => {
+        try {
+            request.query = schema.parse(request.query) as Request['query'];
+            next();
+        } catch (error) {
+            if (error instanceof ZodError) {
+                next(new BadRequestError('Request query validation failed.', 'VALIDATION_ERROR'));
+                return;
+            }
+
+            next(error);
+        }
+    };
+};

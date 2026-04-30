@@ -1,14 +1,11 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
-
 import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { z } from 'zod';
 
-import { authenticatedUserResponseSchema, postListResponseSchema, postResponseSchema, userResponseSchema } from '@codex-blog/contracts';
+import { authenticatedUserResponseSchema, paginatedPostsResponseSchema, postResponseSchema, userResponseSchema } from '@codex-blog/contracts';
 import { createPrismaClient, HmacTokenService } from '@codex-blog/infrastructure';
 
+import { withPrismaApiTestDatabase } from './api-test-database.js';
 import { createApp } from './create-app.js';
 
 const problemDetailsSchema = z.object({
@@ -19,136 +16,6 @@ const problemDetailsSchema = z.object({
     title: z.string(),
     type: z.string(),
 });
-
-const createIdentitySchema = async (databaseUrl: string): Promise<void> => {
-    const prisma = createPrismaClient(databaseUrl);
-
-    try {
-        await prisma.$connect();
-        await prisma.$executeRaw`
-            CREATE TABLE "users" (
-                "id" TEXT NOT NULL PRIMARY KEY,
-                "email" TEXT NOT NULL,
-                "displayName" TEXT NOT NULL,
-                "role" TEXT NOT NULL,
-                "status" TEXT NOT NULL,
-                "passwordHash" TEXT NOT NULL,
-                "createdAt" DATETIME NOT NULL,
-                "updatedAt" DATETIME NOT NULL
-            )
-        `;
-        await prisma.$executeRaw`CREATE UNIQUE INDEX "users_email_key" ON "users" ("email")`;
-        await prisma.$executeRaw`
-            CREATE TABLE "sessions" (
-                "id" TEXT NOT NULL PRIMARY KEY,
-                "userId" TEXT NOT NULL,
-                "refreshTokenId" TEXT NOT NULL,
-                "createdAt" DATETIME NOT NULL,
-                "expiresAt" DATETIME NOT NULL,
-                "revokedAt" DATETIME,
-                "replacedBySessionId" TEXT,
-                CONSTRAINT "sessions_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-            )
-        `;
-        await prisma.$executeRaw`CREATE UNIQUE INDEX "sessions_refreshTokenId_key" ON "sessions" ("refreshTokenId")`;
-        await prisma.$executeRaw`CREATE INDEX "sessions_userId_idx" ON "sessions" ("userId")`;
-        await prisma.$executeRaw`
-            CREATE TABLE "security_events" (
-                "id" TEXT NOT NULL PRIMARY KEY,
-                "type" TEXT NOT NULL,
-                "userId" TEXT NOT NULL,
-                "occurredAt" DATETIME NOT NULL,
-                "correlationId" TEXT NOT NULL,
-                "metadataJson" TEXT,
-                CONSTRAINT "security_events_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-            )
-        `;
-        await prisma.$executeRaw`CREATE INDEX "security_events_userId_idx" ON "security_events" ("userId")`;
-        await prisma.$executeRaw`
-            CREATE TABLE "password_reset_tokens" (
-                "token" TEXT NOT NULL PRIMARY KEY,
-                "userId" TEXT NOT NULL,
-                "expiresAt" DATETIME NOT NULL,
-                "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                CONSTRAINT "password_reset_tokens_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-            )
-        `;
-        await prisma.$executeRaw`CREATE INDEX "password_reset_tokens_userId_idx" ON "password_reset_tokens" ("userId")`;
-        await prisma.$executeRaw`
-            CREATE TABLE "posts" (
-                "id" TEXT NOT NULL PRIMARY KEY,
-                "authorId" TEXT NOT NULL,
-                "title" TEXT NOT NULL,
-                "slug" TEXT NOT NULL,
-                "excerpt" TEXT NOT NULL,
-                "contentJson" TEXT NOT NULL,
-                "seoJson" TEXT NOT NULL,
-                "status" TEXT NOT NULL,
-                "publishedAt" DATETIME,
-                "scheduledFor" DATETIME,
-                "archivedAt" DATETIME,
-                "createdAt" DATETIME NOT NULL,
-                "updatedAt" DATETIME NOT NULL,
-                CONSTRAINT "posts_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-            )
-        `;
-        await prisma.$executeRaw`CREATE UNIQUE INDEX "posts_slug_key" ON "posts" ("slug")`;
-        await prisma.$executeRaw`CREATE INDEX "posts_authorId_idx" ON "posts" ("authorId")`;
-        await prisma.$executeRaw`CREATE INDEX "posts_status_idx" ON "posts" ("status")`;
-        await prisma.$executeRaw`CREATE INDEX "posts_publishedAt_idx" ON "posts" ("publishedAt")`;
-        await prisma.$executeRaw`CREATE INDEX "posts_scheduledFor_idx" ON "posts" ("scheduledFor")`;
-        await prisma.$executeRaw`
-            CREATE TABLE "post_revisions" (
-                "id" TEXT NOT NULL PRIMARY KEY,
-                "postId" TEXT NOT NULL,
-                "number" INTEGER NOT NULL,
-                "title" TEXT NOT NULL,
-                "excerpt" TEXT NOT NULL,
-                "contentJson" TEXT NOT NULL,
-                "seoJson" TEXT NOT NULL,
-                "createdAt" DATETIME NOT NULL,
-                "createdByUserId" TEXT NOT NULL,
-                CONSTRAINT "post_revisions_postId_fkey" FOREIGN KEY ("postId") REFERENCES "posts" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
-                CONSTRAINT "post_revisions_createdByUserId_fkey" FOREIGN KEY ("createdByUserId") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-            )
-        `;
-        await prisma.$executeRaw`CREATE UNIQUE INDEX "post_revisions_postId_number_key" ON "post_revisions" ("postId", "number")`;
-        await prisma.$executeRaw`CREATE INDEX "post_revisions_postId_idx" ON "post_revisions" ("postId")`;
-        await prisma.$executeRaw`CREATE INDEX "post_revisions_createdByUserId_idx" ON "post_revisions" ("createdByUserId")`;
-    } finally {
-        await prisma.$disconnect();
-    }
-};
-
-const withPrismaEnvironment = async (work: (databaseUrl: string) => Promise<void>): Promise<void> => {
-    const previousDataSource = process.env.DATA_SOURCE;
-    const previousDatabaseUrl = process.env.DATABASE_URL;
-    const tempDirectory = await mkdtemp(path.join(tmpdir(), 'codex-blog-api-prisma-'));
-    const databaseUrl = `file:${path.join(tempDirectory, 'api-test.db')}`;
-
-    try {
-        await createIdentitySchema(databaseUrl);
-
-        process.env.DATA_SOURCE = 'prisma';
-        process.env.DATABASE_URL = databaseUrl;
-
-        await work(databaseUrl);
-    } finally {
-        if (previousDataSource === undefined) {
-            delete process.env.DATA_SOURCE;
-        } else {
-            process.env.DATA_SOURCE = previousDataSource;
-        }
-
-        if (previousDatabaseUrl === undefined) {
-            delete process.env.DATABASE_URL;
-        } else {
-            process.env.DATABASE_URL = previousDatabaseUrl;
-        }
-
-        await rm(tempDirectory, { recursive: true, force: true });
-    }
-};
 
 describe('createApp', () => {
     it('returns health status under v1', async () => {
@@ -258,7 +125,7 @@ describe('createApp', () => {
     });
 
     it('uses Prisma persistence when DATA_SOURCE is prisma', async () => {
-        await withPrismaEnvironment(async () => {
+        await withPrismaApiTestDatabase(async () => {
             const firstApp = createApp();
             const registrationResponse = await request(firstApp.app)
                 .post('/v1/auth/register')
@@ -287,7 +154,7 @@ describe('createApp', () => {
     });
 
     it('resets passwords through the Prisma-backed auth API', async () => {
-        await withPrismaEnvironment(async (databaseUrl) => {
+        await withPrismaApiTestDatabase(async (databaseUrl) => {
             const created = createApp();
             const registrationResponse = await request(created.app)
                 .post('/v1/auth/register')
@@ -371,7 +238,7 @@ describe('createApp', () => {
     });
 
     it('enforces user management permission boundaries through the API', async () => {
-        await withPrismaEnvironment(async (databaseUrl) => {
+        await withPrismaApiTestDatabase(async (databaseUrl) => {
             const created = createApp();
             const adminRegistrationResponse = await request(created.app)
                 .post('/v1/auth/register')
@@ -463,7 +330,7 @@ describe('createApp', () => {
     });
 
     it('manages publishing lifecycle through the Prisma-backed API', async () => {
-        await withPrismaEnvironment(async (databaseUrl) => {
+        await withPrismaApiTestDatabase(async (databaseUrl) => {
             const created = createApp();
             const authorResponse = await request(created.app)
                 .post('/v1/auth/register')
@@ -550,7 +417,7 @@ describe('createApp', () => {
                     .expect(201);
                 const draft = postResponseSchema.parse(draftResponse.body);
 
-                expect(postListResponseSchema.parse((await request(created.app).get('/v1/posts').expect(200)).body)).toHaveLength(0);
+                expect(paginatedPostsResponseSchema.parse((await request(created.app).get('/v1/posts').expect(200)).body).items).toHaveLength(0);
                 await request(created.app).get('/v1/posts/publishing-api-post').expect(404);
 
                 const updatedResponse = await request(created.app)
@@ -591,8 +458,38 @@ describe('createApp', () => {
                 const published = postResponseSchema.parse(publishedResponse.body);
 
                 expect(published.status).toBe('published');
-                expect(postListResponseSchema.parse((await request(created.app).get('/v1/posts').expect(200)).body)).toHaveLength(1);
+                expect(paginatedPostsResponseSchema.parse((await request(created.app).get('/v1/posts').expect(200)).body).items).toHaveLength(1);
                 expect(postResponseSchema.parse((await request(created.app).get('/v1/posts/publishing-api-post').expect(200)).body).id).toBe(draft.id);
+
+                const secondPublishedDraftResponse = await request(created.app)
+                    .post('/v1/posts')
+                    .set('authorization', authorBearer)
+                    .send({
+                        ...draftInput,
+                        title: 'Second published post',
+                        slug: 'second-published-post',
+                    })
+                    .expect(201);
+                const secondPublishedDraft = postResponseSchema.parse(secondPublishedDraftResponse.body);
+                await request(created.app)
+                    .post(`/v1/posts/${secondPublishedDraft.id}/publish`)
+                    .set('authorization', editorBearer)
+                    .expect(200);
+                const firstPage = paginatedPostsResponseSchema.parse(
+                    (await request(created.app).get('/v1/posts').query({ limit: 1 }).expect(200)).body
+                );
+                const nextCursor = firstPage.nextCursor;
+
+                if (nextCursor === undefined) {
+                    throw new Error('Expected first published posts page to include a next cursor.');
+                }
+
+                const secondPage = paginatedPostsResponseSchema.parse(
+                    (await request(created.app).get('/v1/posts').query({ limit: 1, cursor: nextCursor }).expect(200)).body
+                );
+
+                expect(firstPage.items).toHaveLength(1);
+                expect(secondPage.items).toHaveLength(1);
 
                 const scheduledDraftResponse = await request(created.app)
                     .post('/v1/posts')
@@ -618,6 +515,101 @@ describe('createApp', () => {
                     .expect(200);
 
                 expect(postResponseSchema.parse(archivedResponse.body).status).toBe('archived');
+            } finally {
+                await prisma.$disconnect();
+                await created.dispose();
+            }
+        });
+    });
+
+    it('serializes publishing validation and conflict errors as problem details', async () => {
+        await withPrismaApiTestDatabase(async (databaseUrl) => {
+            const created = createApp();
+            const editorResponse = await request(created.app)
+                .post('/v1/auth/register')
+                .send({
+                    email: 'publishing-editor@example.com',
+                    displayName: 'Publishing Editor',
+                    password: 'secret-123',
+                })
+                .expect(201);
+            const editor = authenticatedUserResponseSchema.parse(editorResponse.body);
+            const prisma = createPrismaClient(databaseUrl);
+
+            try {
+                await prisma.user.update({
+                    where: {
+                        id: editor.user.id,
+                    },
+                    data: {
+                        role: 'editor',
+                    },
+                });
+                const editorLoginResponse = await request(created.app)
+                    .post('/v1/auth/login')
+                    .send({
+                        email: 'publishing-editor@example.com',
+                        password: 'secret-123',
+                    })
+                    .expect(200);
+                const editorBearer = `Bearer ${authenticatedUserResponseSchema.parse(editorLoginResponse.body).tokens.accessToken}`;
+                const validInput = {
+                    title: 'Validated publishing post',
+                    slug: 'validated-publishing-post',
+                    excerpt: 'Validated excerpt',
+                    content: {
+                        version: 1,
+                        blocks: [{ type: 'paragraph', text: 'Validated content' }],
+                    },
+                    seo: {},
+                };
+
+                await request(created.app).post('/v1/posts').send(validInput).expect(401);
+                const invalidSlugResponse = await request(created.app)
+                    .post('/v1/posts')
+                    .set('authorization', editorBearer)
+                    .send({
+                        ...validInput,
+                        slug: 'Invalid Slug',
+                    })
+                    .expect(400);
+                const invalidContentResponse = await request(created.app)
+                    .post('/v1/posts')
+                    .set('authorization', editorBearer)
+                    .send({
+                        ...validInput,
+                        content: {
+                            version: 1,
+                            blocks: [{ type: 'paragraph', text: '' }],
+                        },
+                    })
+                    .expect(400);
+                const createdPostResponse = await request(created.app)
+                    .post('/v1/posts')
+                    .set('authorization', editorBearer)
+                    .send(validInput)
+                    .expect(201);
+                const duplicateSlugResponse = await request(created.app)
+                    .post('/v1/posts')
+                    .set('authorization', editorBearer)
+                    .send({
+                        ...validInput,
+                        title: 'Duplicate publishing post',
+                    })
+                    .expect(409);
+                const createdPost = postResponseSchema.parse(createdPostResponse.body);
+                const invalidScheduleResponse = await request(created.app)
+                    .post(`/v1/posts/${createdPost.id}/schedule`)
+                    .set('authorization', editorBearer)
+                    .send({
+                        scheduledFor: '2020-01-01T00:00:00.000Z',
+                    })
+                    .expect(400);
+
+                expect(problemDetailsSchema.parse(invalidSlugResponse.body).code).toBe('VALIDATION_ERROR');
+                expect(problemDetailsSchema.parse(invalidContentResponse.body).code).toBe('VALIDATION_ERROR');
+                expect(problemDetailsSchema.parse(duplicateSlugResponse.body).code).toBe('POST_SLUG_ALREADY_EXISTS');
+                expect(problemDetailsSchema.parse(invalidScheduleResponse.body).code).toBe('INVALID_SCHEDULED_DATE');
             } finally {
                 await prisma.$disconnect();
                 await created.dispose();

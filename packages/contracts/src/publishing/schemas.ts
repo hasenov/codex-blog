@@ -103,6 +103,10 @@ export const schedulePostRequestSchema = z.object({
 });
 
 export const postListResponseSchema = z.array(postResponseSchema);
+export const paginatedPostsResponseSchema = z.object({
+    items: z.array(postResponseSchema),
+    nextCursor: z.string().min(1).optional(),
+});
 export const postRevisionsResponseSchema = z.array(postRevisionResponseSchema);
 
 export type PostStatus = z.infer<typeof postStatusSchema>;
@@ -116,6 +120,7 @@ export type RichContent = z.infer<typeof richContentSchema>;
 export type SeoMetadata = z.infer<typeof seoMetadataSchema>;
 export type PostRevisionResponse = z.infer<typeof postRevisionResponseSchema>;
 export type PostResponse = z.infer<typeof postResponseSchema>;
+export type PaginatedPostsResponse = z.infer<typeof paginatedPostsResponseSchema>;
 export type CreatePostRequest = z.infer<typeof createPostRequestSchema>;
 export type UpdatePostRequest = z.infer<typeof updatePostRequestSchema>;
 export type SchedulePostRequest = z.infer<typeof schedulePostRequestSchema>;

@@ -17,7 +17,7 @@ import {
 
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from '../shared/errors/application-error.js';
 import type { Clock, IdGenerator, TransactionManager } from '../shared/ports/core.js';
-import type { PostDto, PostRevisionDto, PublishingActorDto, RichContentDto, SeoMetadataDto } from './dto.js';
+import type { PaginatedPostsDto, PostDto, PostRevisionDto, PublishingActorDto, RichContentDto, SeoMetadataDto } from './dto.js';
 import { toPostDto, toPostRevisionDto } from './mappers.js';
 
 interface PublishingUseCaseDependencies {
@@ -75,6 +75,11 @@ interface GetPublishedPostBySlugInput {
 interface GetPostRevisionsInput {
     actor: PublishingActorDto;
     postId: string;
+}
+
+interface ListPublishedPostsInput {
+    cursor?: string;
+    limit: number;
 }
 
 const buildEditableContent = (input: {
@@ -245,9 +250,18 @@ export class RestorePostRevisionUseCase {
 export class ListPublishedPostsUseCase {
     public constructor(private readonly dependencies: PublishingUseCaseDependencies) {}
 
-    public async execute(): Promise<PostDto[]> {
-        const posts = await this.dependencies.postRepository.listPublished();
-        return posts.map((post) => toPostDto(post));
+    public async execute(input: ListPublishedPostsInput): Promise<PaginatedPostsDto> {
+        const posts = await this.dependencies.postRepository.listPublished({
+            limit: input.limit + 1,
+            ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+        });
+        const items = posts.slice(0, input.limit).map((post) => toPostDto(post));
+        const nextCursor = posts.length > input.limit ? items.at(-1)?.id : undefined;
+
+        return {
+            items,
+            ...(nextCursor === undefined ? {} : { nextCursor }),
+        };
     }
 }
 

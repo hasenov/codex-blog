@@ -36,3 +36,8 @@ export interface PostDto {
     title: string;
     updatedAt: string;
 }
+
+export interface PaginatedPostsDto {
+    items: PostDto[];
+    nextCursor?: string;
+}

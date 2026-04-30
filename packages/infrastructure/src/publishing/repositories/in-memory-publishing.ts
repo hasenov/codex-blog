@@ -1,4 +1,4 @@
-import { Post, type PostRepository, type Slug } from '@codex-blog/domain';
+import { Post, type ListPublishedPostsOptions, type PostRepository, type Slug } from '@codex-blog/domain';
 
 export class InMemoryPostRepository implements PostRepository {
     private readonly posts = new Map<string, Post>();
@@ -22,7 +22,7 @@ export class InMemoryPostRepository implements PostRepository {
         return Promise.resolve(null);
     }
 
-    public listPublished(): Promise<Post[]> {
+    public listPublished(options: ListPublishedPostsOptions): Promise<Post[]> {
         const posts = Array.from(this.posts.values())
             .filter((post) => post.status === 'published')
             .sort((left, right) => {
@@ -30,8 +30,10 @@ export class InMemoryPostRepository implements PostRepository {
                 const rightTime = right.publishedAt?.toDate().getTime() ?? 0;
                 return rightTime - leftTime;
             });
+        const cursorIndex = options.cursor === undefined ? -1 : posts.findIndex((post) => post.id.toString() === options.cursor);
+        const startIndex = cursorIndex < 0 ? 0 : cursorIndex + 1;
 
-        return Promise.resolve(posts.map((post) => Post.rehydrate(post.toPrimitives())));
+        return Promise.resolve(posts.slice(startIndex, startIndex + options.limit).map((post) => Post.rehydrate(post.toPrimitives())));
     }
 
     public save(post: Post): Promise<void> {
