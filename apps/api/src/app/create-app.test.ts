@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { z } from 'zod';
 
-import { authenticatedUserResponseSchema, userResponseSchema } from '@codex-blog/contracts';
+import { authenticatedUserResponseSchema, postListResponseSchema, postResponseSchema, userResponseSchema } from '@codex-blog/contracts';
 import { createPrismaClient, HmacTokenService } from '@codex-blog/infrastructure';
 
 import { createApp } from './create-app.js';
@@ -74,6 +74,47 @@ const createIdentitySchema = async (databaseUrl: string): Promise<void> => {
             )
         `;
         await prisma.$executeRaw`CREATE INDEX "password_reset_tokens_userId_idx" ON "password_reset_tokens" ("userId")`;
+        await prisma.$executeRaw`
+            CREATE TABLE "posts" (
+                "id" TEXT NOT NULL PRIMARY KEY,
+                "authorId" TEXT NOT NULL,
+                "title" TEXT NOT NULL,
+                "slug" TEXT NOT NULL,
+                "excerpt" TEXT NOT NULL,
+                "contentJson" TEXT NOT NULL,
+                "seoJson" TEXT NOT NULL,
+                "status" TEXT NOT NULL,
+                "publishedAt" DATETIME,
+                "scheduledFor" DATETIME,
+                "archivedAt" DATETIME,
+                "createdAt" DATETIME NOT NULL,
+                "updatedAt" DATETIME NOT NULL,
+                CONSTRAINT "posts_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+            )
+        `;
+        await prisma.$executeRaw`CREATE UNIQUE INDEX "posts_slug_key" ON "posts" ("slug")`;
+        await prisma.$executeRaw`CREATE INDEX "posts_authorId_idx" ON "posts" ("authorId")`;
+        await prisma.$executeRaw`CREATE INDEX "posts_status_idx" ON "posts" ("status")`;
+        await prisma.$executeRaw`CREATE INDEX "posts_publishedAt_idx" ON "posts" ("publishedAt")`;
+        await prisma.$executeRaw`CREATE INDEX "posts_scheduledFor_idx" ON "posts" ("scheduledFor")`;
+        await prisma.$executeRaw`
+            CREATE TABLE "post_revisions" (
+                "id" TEXT NOT NULL PRIMARY KEY,
+                "postId" TEXT NOT NULL,
+                "number" INTEGER NOT NULL,
+                "title" TEXT NOT NULL,
+                "excerpt" TEXT NOT NULL,
+                "contentJson" TEXT NOT NULL,
+                "seoJson" TEXT NOT NULL,
+                "createdAt" DATETIME NOT NULL,
+                "createdByUserId" TEXT NOT NULL,
+                CONSTRAINT "post_revisions_postId_fkey" FOREIGN KEY ("postId") REFERENCES "posts" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+                CONSTRAINT "post_revisions_createdByUserId_fkey" FOREIGN KEY ("createdByUserId") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+            )
+        `;
+        await prisma.$executeRaw`CREATE UNIQUE INDEX "post_revisions_postId_number_key" ON "post_revisions" ("postId", "number")`;
+        await prisma.$executeRaw`CREATE INDEX "post_revisions_postId_idx" ON "post_revisions" ("postId")`;
+        await prisma.$executeRaw`CREATE INDEX "post_revisions_createdByUserId_idx" ON "post_revisions" ("createdByUserId")`;
     } finally {
         await prisma.$disconnect();
     }
@@ -414,6 +455,169 @@ describe('createApp', () => {
                     .expect(200);
 
                 expect(userResponseSchema.parse(statusResponse.body).status).toBe('suspended');
+            } finally {
+                await prisma.$disconnect();
+                await created.dispose();
+            }
+        });
+    });
+
+    it('manages publishing lifecycle through the Prisma-backed API', async () => {
+        await withPrismaEnvironment(async (databaseUrl) => {
+            const created = createApp();
+            const authorResponse = await request(created.app)
+                .post('/v1/auth/register')
+                .send({
+                    email: 'author@example.com',
+                    displayName: 'Author User',
+                    password: 'secret-123',
+                })
+                .expect(201);
+            const readerResponse = await request(created.app)
+                .post('/v1/auth/register')
+                .send({
+                    email: 'publishing-reader@example.com',
+                    displayName: 'Reader User',
+                    password: 'secret-123',
+                })
+                .expect(201);
+            const editorResponse = await request(created.app)
+                .post('/v1/auth/register')
+                .send({
+                    email: 'editor@example.com',
+                    displayName: 'Editor User',
+                    password: 'secret-123',
+                })
+                .expect(201);
+            const author = authenticatedUserResponseSchema.parse(authorResponse.body);
+            const reader = authenticatedUserResponseSchema.parse(readerResponse.body);
+            const editor = authenticatedUserResponseSchema.parse(editorResponse.body);
+            const prisma = createPrismaClient(databaseUrl);
+
+            try {
+                await prisma.user.update({
+                    where: {
+                        id: author.user.id,
+                    },
+                    data: {
+                        role: 'author',
+                    },
+                });
+                await prisma.user.update({
+                    where: {
+                        id: editor.user.id,
+                    },
+                    data: {
+                        role: 'editor',
+                    },
+                });
+
+                const authorLoginResponse = await request(created.app)
+                    .post('/v1/auth/login')
+                    .send({
+                        email: 'author@example.com',
+                        password: 'secret-123',
+                    })
+                    .expect(200);
+                const editorLoginResponse = await request(created.app)
+                    .post('/v1/auth/login')
+                    .send({
+                        email: 'editor@example.com',
+                        password: 'secret-123',
+                    })
+                    .expect(200);
+                const authorBearer = `Bearer ${authenticatedUserResponseSchema.parse(authorLoginResponse.body).tokens.accessToken}`;
+                const editorBearer = `Bearer ${authenticatedUserResponseSchema.parse(editorLoginResponse.body).tokens.accessToken}`;
+                const readerBearer = `Bearer ${reader.tokens.accessToken}`;
+                const draftInput = {
+                    title: 'Publishing API post',
+                    slug: 'publishing-api-post',
+                    excerpt: 'Visible after publish',
+                    content: {
+                        version: 1,
+                        blocks: [{ type: 'paragraph', text: 'Initial content' }],
+                    },
+                    seo: {
+                        title: 'Publishing API post',
+                    },
+                };
+
+                await request(created.app).post('/v1/posts').set('authorization', readerBearer).send(draftInput).expect(403);
+                const draftResponse = await request(created.app)
+                    .post('/v1/posts')
+                    .set('authorization', authorBearer)
+                    .send(draftInput)
+                    .expect(201);
+                const draft = postResponseSchema.parse(draftResponse.body);
+
+                expect(postListResponseSchema.parse((await request(created.app).get('/v1/posts').expect(200)).body)).toHaveLength(0);
+                await request(created.app).get('/v1/posts/publishing-api-post').expect(404);
+
+                const updatedResponse = await request(created.app)
+                    .patch(`/v1/posts/${draft.id}`)
+                    .set('authorization', authorBearer)
+                    .send({
+                        title: 'Updated publishing API post',
+                        excerpt: 'Updated excerpt',
+                        content: {
+                            version: 1,
+                            blocks: [{ type: 'paragraph', text: 'Updated content' }],
+                        },
+                        seo: {},
+                    })
+                    .expect(200);
+                const updated = postResponseSchema.parse(updatedResponse.body);
+                const revisionsResponse = await request(created.app)
+                    .get(`/v1/posts/${draft.id}/revisions`)
+                    .set('authorization', authorBearer)
+                    .expect(200);
+
+                expect(updated.revisions).toHaveLength(2);
+                expect(revisionsResponse.body).toHaveLength(2);
+
+                const restoredResponse = await request(created.app)
+                    .post(`/v1/posts/${draft.id}/revisions/${draft.revisions[0]?.id}/restore`)
+                    .set('authorization', authorBearer)
+                    .expect(200);
+                const restored = postResponseSchema.parse(restoredResponse.body);
+
+                expect(restored.title).toBe('Publishing API post');
+                expect(restored.revisions).toHaveLength(3);
+
+                const publishedResponse = await request(created.app)
+                    .post(`/v1/posts/${draft.id}/publish`)
+                    .set('authorization', editorBearer)
+                    .expect(200);
+                const published = postResponseSchema.parse(publishedResponse.body);
+
+                expect(published.status).toBe('published');
+                expect(postListResponseSchema.parse((await request(created.app).get('/v1/posts').expect(200)).body)).toHaveLength(1);
+                expect(postResponseSchema.parse((await request(created.app).get('/v1/posts/publishing-api-post').expect(200)).body).id).toBe(draft.id);
+
+                const scheduledDraftResponse = await request(created.app)
+                    .post('/v1/posts')
+                    .set('authorization', authorBearer)
+                    .send({
+                        ...draftInput,
+                        title: 'Scheduled post',
+                        slug: 'scheduled-post',
+                    })
+                    .expect(201);
+                const scheduledDraft = postResponseSchema.parse(scheduledDraftResponse.body);
+                await request(created.app)
+                    .post(`/v1/posts/${scheduledDraft.id}/schedule`)
+                    .set('authorization', editorBearer)
+                    .send({
+                        scheduledFor: '2999-01-01T00:00:00.000Z',
+                    })
+                    .expect(200);
+                await request(created.app).get('/v1/posts/scheduled-post').expect(404);
+                const archivedResponse = await request(created.app)
+                    .post(`/v1/posts/${scheduledDraft.id}/archive`)
+                    .set('authorization', editorBearer)
+                    .expect(200);
+
+                expect(postResponseSchema.parse(archivedResponse.body).status).toBe('archived');
             } finally {
                 await prisma.$disconnect();
                 await created.dispose();

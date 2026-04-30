@@ -20,8 +20,55 @@ model User {
     sessions        Session[]
     securityEvents  SecurityEvent[]
     passwordResets  PasswordResetToken[]
+    authoredPosts   Post[]         @relation("PostAuthor")
+    postRevisions   PostRevision[] @relation("PostRevisionCreator")
 
     @@map("users")
+}
+
+model Post {
+    id            String    @id
+    authorId      String
+    title         String
+    slug          String    @unique
+    excerpt       String
+    contentJson   String
+    seoJson       String
+    status        String
+    publishedAt   DateTime?
+    scheduledFor  DateTime?
+    archivedAt    DateTime?
+    createdAt     DateTime
+    updatedAt     DateTime
+
+    author    User           @relation("PostAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+    revisions PostRevision[]
+
+    @@index([authorId])
+    @@index([status])
+    @@index([publishedAt])
+    @@index([scheduledFor])
+    @@map("posts")
+}
+
+model PostRevision {
+    id              String   @id
+    postId          String
+    number          Int
+    title           String
+    excerpt         String
+    contentJson     String
+    seoJson         String
+    createdAt       DateTime
+    createdByUserId String
+
+    post          Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+    createdByUser User @relation("PostRevisionCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
+
+    @@unique([postId, number])
+    @@index([postId])
+    @@index([createdByUserId])
+    @@map("post_revisions")
 }
 
 model Session {

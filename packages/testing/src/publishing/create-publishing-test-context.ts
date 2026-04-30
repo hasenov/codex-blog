@@ -25,6 +25,18 @@ export class InMemoryPostRepository implements PostRepository {
         return Promise.resolve(null);
     }
 
+    public listPublished(): Promise<Post[]> {
+        const posts = Array.from(this.posts.values())
+            .filter((post) => post.status === 'published')
+            .sort((left, right) => {
+                const leftTime = left.publishedAt?.toDate().getTime() ?? 0;
+                const rightTime = right.publishedAt?.toDate().getTime() ?? 0;
+                return rightTime - leftTime;
+            });
+
+        return Promise.resolve(posts.map((post) => Post.rehydrate(post.toPrimitives())));
+    }
+
     public save(post: Post): Promise<void> {
         this.posts.set(post.id.toString(), Post.rehydrate(post.toPrimitives()));
         return Promise.resolve();

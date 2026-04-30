@@ -54,6 +54,57 @@ export const seoMetadataSchema = z.object({
     ogImageUrl: z.string().url().optional(),
 });
 
+export const postRevisionResponseSchema = z.object({
+    id: z.string().min(1),
+    number: z.number().int().positive(),
+    title: z.string().min(3),
+    excerpt: z.string().max(500),
+    content: richContentSchema,
+    seo: seoMetadataSchema,
+    createdAt: z.string().datetime(),
+    createdByUserId: z.string().min(1),
+});
+
+export const postResponseSchema = z.object({
+    id: z.string().min(1),
+    authorId: z.string().min(1),
+    title: z.string().min(3),
+    slug: z.string().min(1),
+    excerpt: z.string().max(500),
+    content: richContentSchema,
+    seo: seoMetadataSchema,
+    status: postStatusSchema,
+    revisions: z.array(postRevisionResponseSchema),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+    publishedAt: z.string().datetime().optional(),
+    scheduledFor: z.string().datetime().optional(),
+    archivedAt: z.string().datetime().optional(),
+});
+
+export const createPostRequestSchema = z.object({
+    authorId: z.string().min(8).optional(),
+    title: z.string().min(3).max(160),
+    slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+    excerpt: z.string().max(500),
+    content: richContentSchema,
+    seo: seoMetadataSchema.default({}),
+});
+
+export const updatePostRequestSchema = z.object({
+    title: z.string().min(3).max(160),
+    excerpt: z.string().max(500),
+    content: richContentSchema,
+    seo: seoMetadataSchema.default({}),
+});
+
+export const schedulePostRequestSchema = z.object({
+    scheduledFor: z.string().datetime(),
+});
+
+export const postListResponseSchema = z.array(postResponseSchema);
+export const postRevisionsResponseSchema = z.array(postRevisionResponseSchema);
+
 export type PostStatus = z.infer<typeof postStatusSchema>;
 export type RichContentParagraphBlock = z.infer<typeof richContentParagraphBlockSchema>;
 export type RichContentHeadingBlock = z.infer<typeof richContentHeadingBlockSchema>;
@@ -63,3 +114,8 @@ export type RichContentCodeBlock = z.infer<typeof richContentCodeBlockSchema>;
 export type RichContentBlock = z.infer<typeof richContentBlockSchema>;
 export type RichContent = z.infer<typeof richContentSchema>;
 export type SeoMetadata = z.infer<typeof seoMetadataSchema>;
+export type PostRevisionResponse = z.infer<typeof postRevisionResponseSchema>;
+export type PostResponse = z.infer<typeof postResponseSchema>;
+export type CreatePostRequest = z.infer<typeof createPostRequestSchema>;
+export type UpdatePostRequest = z.infer<typeof updatePostRequestSchema>;
+export type SchedulePostRequest = z.infer<typeof schedulePostRequestSchema>;

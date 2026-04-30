@@ -17,8 +17,8 @@ import {
 
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from '../shared/errors/application-error.js';
 import type { Clock, IdGenerator, TransactionManager } from '../shared/ports/core.js';
-import type { PostDto, PublishingActorDto, RichContentDto, SeoMetadataDto } from './dto.js';
-import { toPostDto } from './mappers.js';
+import type { PostDto, PostRevisionDto, PublishingActorDto, RichContentDto, SeoMetadataDto } from './dto.js';
+import { toPostDto, toPostRevisionDto } from './mappers.js';
 
 interface PublishingUseCaseDependencies {
     clock: Clock;
@@ -66,6 +66,15 @@ interface RestorePostRevisionInput {
     actor: PublishingActorDto;
     postId: string;
     revisionId: string;
+}
+
+interface GetPublishedPostBySlugInput {
+    slug: string;
+}
+
+interface GetPostRevisionsInput {
+    actor: PublishingActorDto;
+    postId: string;
 }
 
 const buildEditableContent = (input: {
@@ -230,6 +239,47 @@ export class RestorePostRevisionUseCase {
                 throw mapPublishingError(error);
             }
         });
+    }
+}
+
+export class ListPublishedPostsUseCase {
+    public constructor(private readonly dependencies: PublishingUseCaseDependencies) {}
+
+    public async execute(): Promise<PostDto[]> {
+        const posts = await this.dependencies.postRepository.listPublished();
+        return posts.map((post) => toPostDto(post));
+    }
+}
+
+export class GetPublishedPostBySlugUseCase {
+    public constructor(private readonly dependencies: PublishingUseCaseDependencies) {}
+
+    public async execute(input: GetPublishedPostBySlugInput): Promise<PostDto> {
+        try {
+            const post = await this.dependencies.postRepository.findBySlug(Slug.create(input.slug));
+
+            if (post === null || post.status !== 'published') {
+                throw new NotFoundError('Post was not found.', 'POST_NOT_FOUND');
+            }
+
+            return toPostDto(post);
+        } catch (error) {
+            throw mapPublishingError(error);
+        }
+    }
+}
+
+export class GetPostRevisionsUseCase {
+    public constructor(private readonly dependencies: PublishingUseCaseDependencies) {}
+
+    public async execute(input: GetPostRevisionsInput): Promise<PostRevisionDto[]> {
+        try {
+            const post = await findPostOrThrow(this.dependencies.postRepository, input.postId);
+            assertCanUpdateDraftPost(input.actor, post);
+            return post.revisions.map((revision) => toPostRevisionDto(revision));
+        } catch (error) {
+            throw mapPublishingError(error);
+        }
     }
 }
 

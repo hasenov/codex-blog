@@ -15,7 +15,7 @@ import {
 import type { AppConfig } from '@codex-blog/config';
 import {
     ConsoleNotificationPort,
-    createPrismaClient,
+    type createPrismaClient,
     HmacTokenService,
     InMemoryPasswordResetTokenStore,
     InMemorySecurityEventRepository,
@@ -32,6 +32,8 @@ import {
     SystemClock,
 } from '@codex-blog/infrastructure';
 
+type PrismaClient = ReturnType<typeof createPrismaClient>;
+
 class RequestCorrelationIdProvider implements CorrelationIdProvider {
     public constructor(private readonly getCurrentCorrelationId: () => string) {}
 
@@ -40,8 +42,11 @@ class RequestCorrelationIdProvider implements CorrelationIdProvider {
     }
 }
 
-export const buildIdentityDependencies = (config: AppConfig, getCurrentCorrelationId: () => string) => {
-    const prisma = config.DATA_SOURCE === 'prisma' ? createPrismaClient(config.DATABASE_URL) : undefined;
+export const buildIdentityDependencies = (
+    config: AppConfig,
+    getCurrentCorrelationId: () => string,
+    prisma?: PrismaClient
+) => {
     const userRepository = prisma === undefined ? new InMemoryUserRepository() : new PrismaUserRepository(prisma);
     const sessionRepository =
         prisma === undefined ? new InMemorySessionRepository() : new PrismaSessionRepository(prisma);
@@ -84,8 +89,5 @@ export const buildIdentityDependencies = (config: AppConfig, getCurrentCorrelati
         changeUserStatus: new ChangeUserStatusUseCase(commonDependencies),
         forgotPassword: new ForgotPasswordUseCase(commonDependencies),
         resetPassword: new ResetPasswordUseCase(commonDependencies),
-        dispose: async (): Promise<void> => {
-            await prisma?.$disconnect();
-        },
     };
 };

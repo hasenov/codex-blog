@@ -5,8 +5,10 @@ import helmet from 'helmet';
 
 import { loadConfig } from '@codex-blog/config';
 import type { AppConfig } from '@codex-blog/config';
+import { createPrismaClient } from '@codex-blog/infrastructure';
 
 import { buildIdentityDependencies } from './build-identity-dependencies.js';
+import { buildPublishingDependencies } from './build-publishing-dependencies.js';
 import { getCurrentCorrelationId } from './request-scope.js';
 import { errorHandler } from '../middleware/error-handler.js';
 import { attachRequestContext } from '../middleware/request-context.js';
@@ -35,14 +37,18 @@ export const createApp = (): CreatedApp => {
     app.use(express.json());
     app.use(attachRequestContext);
 
-    const identity = buildIdentityDependencies(config, getCurrentCorrelationId);
+    const prisma = config.DATA_SOURCE === 'prisma' ? createPrismaClient(config.DATABASE_URL) : undefined;
+    const identity = buildIdentityDependencies(config, getCurrentCorrelationId, prisma);
+    const publishing = buildPublishingDependencies(config, prisma);
 
-    app.use(config.API_PREFIX, buildV1Router(identity));
+    app.use(config.API_PREFIX, buildV1Router(identity, publishing));
     app.use(errorHandler);
 
     return {
         app,
         config,
-        dispose: identity.dispose,
+        dispose: async (): Promise<void> => {
+            await prisma?.$disconnect();
+        },
     };
 };
