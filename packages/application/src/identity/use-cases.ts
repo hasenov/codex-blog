@@ -313,7 +313,12 @@ export class GetUserByIdUseCase {
     public constructor(private readonly dependencies: IdentityUseCaseDependencies) {}
 
     public async execute(actor: ActorContext, userId: string): Promise<UserDto> {
-        assertCanManageUsers(actor.role);
+        try {
+            assertCanManageUsers(actor.role);
+        } catch (error) {
+            throw mapDomainError(error);
+        }
+
         const user = await this.dependencies.userRepository.findById(userId);
 
         if (user === null) {
@@ -328,7 +333,12 @@ export class ListUsersUseCase {
     public constructor(private readonly dependencies: IdentityUseCaseDependencies) {}
 
     public async execute(actor: ActorContext): Promise<UserDto[]> {
-        assertCanManageUsers(actor.role);
+        try {
+            assertCanManageUsers(actor.role);
+        } catch (error) {
+            throw mapDomainError(error);
+        }
+
         const users = await this.dependencies.userRepository.list();
         return users.map((user) => toUserDto(user));
     }
@@ -422,14 +432,39 @@ export class ForgotPasswordUseCase {
 }
 
 export class ResetPasswordUseCase {
-    public constructor(private readonly _dependencies: IdentityUseCaseDependencies) {}
+    public constructor(private readonly dependencies: IdentityUseCaseDependencies) {}
 
-    public execute(input: ResetPasswordInput): Promise<void> {
-        void input;
-        throw new ForbiddenError(
-            'Reset password token verification is reserved for a later infrastructure milestone.',
-            'RESET_PASSWORD_NOT_READY'
-        );
+    public async execute(input: ResetPasswordInput): Promise<void> {
+        ensurePasswordStrength(input.nextPassword);
+
+        const now = UtcDateTime.create(this.dependencies.clock.now());
+        await this.dependencies.passwordResetTokenStore.deleteExpired(now.toISOString());
+        const token = await this.dependencies.passwordResetTokenStore.consume(input.token);
+
+        if (token === null) {
+            throw new UnauthorizedError('Password reset token is invalid or expired.', 'INVALID_PASSWORD_RESET_TOKEN');
+        }
+
+        if (UtcDateTime.fromISOString(token.expiresAt).toDate().getTime() <= now.toDate().getTime()) {
+            throw new UnauthorizedError('Password reset token is invalid or expired.', 'INVALID_PASSWORD_RESET_TOKEN');
+        }
+
+        const user = await this.dependencies.userRepository.findById(token.userId);
+
+        if (user === null) {
+            throw new UnauthorizedError('Password reset token is invalid or expired.', 'INVALID_PASSWORD_RESET_TOKEN');
+        }
+
+        const passwordHash = await this.dependencies.passwordHasher.hash(input.nextPassword);
+        user.changePassword(passwordHash, now);
+        await this.dependencies.userRepository.save(user);
+        await this.dependencies.sessionRepository.revokeAllForUser(user.id.toString(), now.toISOString());
+        await this.dependencies.securityEventRepository.append({
+            type: 'password_reset',
+            userId: user.id.toString(),
+            occurredAt: now.toISOString(),
+            correlationId: this.dependencies.correlationIdProvider.getCorrelationId(),
+        });
     }
 }
 

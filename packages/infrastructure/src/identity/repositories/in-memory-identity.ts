@@ -86,7 +86,29 @@ export class InMemoryPasswordResetTokenStore implements PasswordResetTokenStore 
         return Promise.resolve();
     }
 
-    public get(token: string): { expiresAt: string; userId: string } | null {
-        return this.tokens.get(token) ?? null;
+    public findByToken(token: string): Promise<{ expiresAt: string; userId: string } | null> {
+        return Promise.resolve(this.tokens.get(token) ?? null);
+    }
+
+    public consume(token: string): Promise<{ expiresAt: string; userId: string } | null> {
+        const record = this.tokens.get(token) ?? null;
+
+        if (record !== null) {
+            this.tokens.delete(token);
+        }
+
+        return Promise.resolve(record);
+    }
+
+    public deleteExpired(nowIso: string): Promise<void> {
+        const now = UtcDateTime.fromISOString(nowIso).toDate().getTime();
+
+        for (const [token, record] of this.tokens.entries()) {
+            if (UtcDateTime.fromISOString(record.expiresAt).toDate().getTime() <= now) {
+                this.tokens.delete(token);
+            }
+        }
+
+        return Promise.resolve();
     }
 }

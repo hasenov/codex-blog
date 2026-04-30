@@ -271,4 +271,47 @@ export class PrismaPasswordResetTokenStore implements PasswordResetTokenStore {
             },
         });
     }
+
+    public async findByToken(token: string): Promise<{ expiresAt: string; userId: string } | null> {
+        const record = await this.prisma.passwordResetToken.findUnique({
+            where: {
+                token,
+            },
+        });
+
+        if (record === null) {
+            return null;
+        }
+
+        return {
+            userId: record.userId,
+            expiresAt: record.expiresAt.toISOString(),
+        };
+    }
+
+    public async consume(token: string): Promise<{ expiresAt: string; userId: string } | null> {
+        const record = await this.findByToken(token);
+
+        if (record === null) {
+            return null;
+        }
+
+        await this.prisma.passwordResetToken.delete({
+            where: {
+                token,
+            },
+        });
+
+        return record;
+    }
+
+    public async deleteExpired(nowIso: string): Promise<void> {
+        await this.prisma.passwordResetToken.deleteMany({
+            where: {
+                expiresAt: {
+                    lte: UtcDateTime.fromISOString(nowIso).toDate(),
+                },
+            },
+        });
+    }
 }

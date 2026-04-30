@@ -155,18 +155,39 @@ describe('Prisma identity repositories', () => {
         ]);
     });
 
-    it('persists password reset tokens', async () => {
+    it('persists and finds password reset tokens', async () => {
         await new PrismaUserRepository(prisma).save(createTestUser('user-0001', 'reader@example.com'));
         const store = new PrismaPasswordResetTokenStore(prisma);
 
         await store.save('user-0001', 'reset-token', '2026-01-01T01:00:00.000Z');
-        const token = await prisma.passwordResetToken.findUnique({
-            where: {
-                token: 'reset-token',
-            },
-        });
+        const token = await store.findByToken('reset-token');
 
         expect(token?.userId).toBe('user-0001');
-        expect(token?.expiresAt.toISOString()).toBe('2026-01-01T01:00:00.000Z');
+        expect(token?.expiresAt).toBe('2026-01-01T01:00:00.000Z');
+    });
+
+    it('consumes password reset tokens once', async () => {
+        await new PrismaUserRepository(prisma).save(createTestUser('user-0001', 'reader@example.com'));
+        const store = new PrismaPasswordResetTokenStore(prisma);
+
+        await store.save('user-0001', 'reset-token', '2026-01-01T01:00:00.000Z');
+
+        const consumed = await store.consume('reset-token');
+        const consumedAgain = await store.consume('reset-token');
+
+        expect(consumed?.userId).toBe('user-0001');
+        expect(consumedAgain).toBeNull();
+    });
+
+    it('deletes expired password reset tokens', async () => {
+        await new PrismaUserRepository(prisma).save(createTestUser('user-0001', 'reader@example.com'));
+        const store = new PrismaPasswordResetTokenStore(prisma);
+
+        await store.save('user-0001', 'expired-token', '2026-01-01T00:59:59.000Z');
+        await store.save('user-0001', 'active-token', '2026-01-01T01:00:01.000Z');
+        await store.deleteExpired('2026-01-01T01:00:00.000Z');
+
+        expect(await store.findByToken('expired-token')).toBeNull();
+        expect(await store.findByToken('active-token')).not.toBeNull();
     });
 });

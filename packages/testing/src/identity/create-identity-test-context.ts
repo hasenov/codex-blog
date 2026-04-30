@@ -12,8 +12,14 @@ import {
 } from '@codex-blog/infrastructure';
 
 class FixedClock {
+    private current = new Date('2026-01-01T00:00:00.000Z');
+
     public now(): Date {
-        return new Date('2026-01-01T00:00:00.000Z');
+        return this.current;
+    }
+
+    public setCurrent(value: Date): void {
+        this.current = value;
     }
 }
 
@@ -41,27 +47,40 @@ class TestLogger implements Logger {
 }
 
 class TestNotificationPort {
+    public readonly sentPasswordResetInstructions: Array<{ email: string; token: string }> = [];
+
     public sendPasswordResetInstructions(email: string, token: string): Promise<void> {
-        void email;
-        void token;
+        this.sentPasswordResetInstructions.push({ email, token });
         return Promise.resolve();
     }
 }
 
-export const createIdentityTestContext = () => ({
-    dependencies: {
-        userRepository: new InMemoryUserRepository(),
-        sessionRepository: new InMemorySessionRepository(),
-        securityEventRepository: new InMemorySecurityEventRepository(),
-        passwordHasher: new ScryptPasswordHasher(),
-        tokenService: new HmacTokenService('access-secret-1234567890-access', 'refresh-secret-123456789-refresh', 15, 30),
-        idGenerator: new RandomIdGenerator(),
-        clock: new FixedClock(),
-        logger: new TestLogger(),
-        correlationIdProvider: new FixedCorrelationIdProvider(),
-        transactionManager: new InMemoryTransactionManager(),
-        passwordResetTokenStore: new InMemoryPasswordResetTokenStore(),
-        notificationPort: new TestNotificationPort(),
-        refreshTokenTtlDays: 30,
-    },
-});
+export const createIdentityTestContext = () => {
+    const clock = new FixedClock();
+    const notificationPort = new TestNotificationPort();
+
+    return {
+        dependencies: {
+            userRepository: new InMemoryUserRepository(),
+            sessionRepository: new InMemorySessionRepository(),
+            securityEventRepository: new InMemorySecurityEventRepository(),
+            passwordHasher: new ScryptPasswordHasher(),
+            tokenService: new HmacTokenService(
+                'access-secret-1234567890-access',
+                'refresh-secret-123456789-refresh',
+                15,
+                30
+            ),
+            idGenerator: new RandomIdGenerator(),
+            clock,
+            logger: new TestLogger(),
+            correlationIdProvider: new FixedCorrelationIdProvider(),
+            transactionManager: new InMemoryTransactionManager(),
+            passwordResetTokenStore: new InMemoryPasswordResetTokenStore(),
+            notificationPort,
+            refreshTokenTtlDays: 30,
+        },
+        clock,
+        notificationPort,
+    };
+};

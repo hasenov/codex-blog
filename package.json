@@ -11,7 +11,8 @@
         "typecheck": "turbo run typecheck",
         "db:generate": "pnpm --filter @codex-blog/infrastructure prisma:generate",
         "db:migrate:dev": "pnpm --filter @codex-blog/infrastructure prisma:migrate:dev",
-        "db:migrate:deploy": "pnpm --filter @codex-blog/infrastructure prisma:migrate:deploy"
+        "db:migrate:deploy": "pnpm --filter @codex-blog/infrastructure prisma:migrate:deploy",
+        "seed:admin": "pnpm --filter @codex-blog/api seed:admin"
     },
     "devDependencies": {
         "@eslint/js": "^9.24.0",

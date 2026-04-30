@@ -5,10 +5,12 @@ import {
     ChangeUserStatusUseCase,
     ConflictError,
     ForbiddenError,
+    ForgotPasswordUseCase,
     LoginUseCase,
     LogoutUseCase,
     RefreshSessionUseCase,
     RegisterUserUseCase,
+    ResetPasswordUseCase,
     UnauthorizedError,
 } from '@codex-blog/application';
 import { UtcDateTime } from '@codex-blog/domain';
@@ -77,6 +79,105 @@ describe('identity use cases', () => {
             new LoginUseCase(context.dependencies).execute({
                 email: 'reader@example.com',
                 password: 'wrong-password',
+            })
+        ).rejects.toThrow(UnauthorizedError);
+    });
+
+    it('sends password reset instructions without revealing missing accounts', async () => {
+        const context = createIdentityTestContext();
+        await new RegisterUserUseCase(context.dependencies).execute({
+            email: 'reader@example.com',
+            displayName: 'Reader',
+            password: 'secret-123',
+        });
+
+        await new ForgotPasswordUseCase(context.dependencies).execute({
+            email: 'reader@example.com',
+        });
+        await new ForgotPasswordUseCase(context.dependencies).execute({
+            email: 'missing@example.com',
+        });
+
+        expect(context.notificationPort.sentPasswordResetInstructions).toHaveLength(1);
+        expect(context.notificationPort.sentPasswordResetInstructions[0]?.email).toBe('reader@example.com');
+    });
+
+    it('resets a password once and revokes existing sessions', async () => {
+        const context = createIdentityTestContext();
+        const registration = await new RegisterUserUseCase(context.dependencies).execute({
+            email: 'reader@example.com',
+            displayName: 'Reader',
+            password: 'secret-123',
+        });
+        await new ForgotPasswordUseCase(context.dependencies).execute({
+            email: 'reader@example.com',
+        });
+        const token = context.notificationPort.sentPasswordResetInstructions[0]?.token;
+
+        if (token === undefined) {
+            throw new Error('Password reset token was not captured.');
+        }
+
+        await new ResetPasswordUseCase(context.dependencies).execute({
+            token,
+            nextPassword: 'secret-456',
+        });
+
+        await expect(
+            new LoginUseCase(context.dependencies).execute({
+                email: 'reader@example.com',
+                password: 'secret-123',
+            })
+        ).rejects.toThrow(UnauthorizedError);
+        await expect(
+            new RefreshSessionUseCase(context.dependencies).execute({
+                refreshToken: registration.tokens.refreshToken,
+            })
+        ).rejects.toThrow(UnauthorizedError);
+
+        const login = await new LoginUseCase(context.dependencies).execute({
+            email: 'reader@example.com',
+            password: 'secret-456',
+        });
+
+        expect(login.user.email).toBe('reader@example.com');
+        await expect(
+            new ResetPasswordUseCase(context.dependencies).execute({
+                token,
+                nextPassword: 'secret-789',
+            })
+        ).rejects.toThrow(UnauthorizedError);
+    });
+
+    it('rejects expired and weak password reset attempts', async () => {
+        const context = createIdentityTestContext();
+        await new RegisterUserUseCase(context.dependencies).execute({
+            email: 'reader@example.com',
+            displayName: 'Reader',
+            password: 'secret-123',
+        });
+        await new ForgotPasswordUseCase(context.dependencies).execute({
+            email: 'reader@example.com',
+        });
+        const token = context.notificationPort.sentPasswordResetInstructions[0]?.token;
+
+        if (token === undefined) {
+            throw new Error('Password reset token was not captured.');
+        }
+
+        await expect(
+            new ResetPasswordUseCase(context.dependencies).execute({
+                token,
+                nextPassword: 'short',
+            })
+        ).rejects.toThrow(UnauthorizedError);
+
+        context.clock.setCurrent(new Date('2026-01-01T02:00:00.000Z'));
+
+        await expect(
+            new ResetPasswordUseCase(context.dependencies).execute({
+                token,
+                nextPassword: 'secret-456',
             })
         ).rejects.toThrow(UnauthorizedError);
     });

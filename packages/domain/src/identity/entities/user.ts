@@ -104,6 +104,18 @@ export class User {
         };
     }
 
+    public changePassword(passwordHash: string, changedAt: UtcDateTime): void {
+        if (passwordHash.trim().length === 0) {
+            throw new DomainError('Password hash must not be empty.', 'INVALID_PASSWORD_HASH');
+        }
+
+        this.props = {
+            ...this.props,
+            passwordHash,
+            updatedAt: changedAt,
+        };
+    }
+
     public toPrimitives(): UserProps {
         return this.props;
     }

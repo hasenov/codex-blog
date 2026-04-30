@@ -7,7 +7,7 @@ import request from 'supertest';
 import { z } from 'zod';
 
 import { authenticatedUserResponseSchema, userResponseSchema } from '@codex-blog/contracts';
-import { createPrismaClient } from '@codex-blog/infrastructure';
+import { createPrismaClient, HmacTokenService } from '@codex-blog/infrastructure';
 
 import { createApp } from './create-app.js';
 
@@ -79,6 +79,36 @@ const createIdentitySchema = async (databaseUrl: string): Promise<void> => {
     }
 };
 
+const withPrismaEnvironment = async (work: (databaseUrl: string) => Promise<void>): Promise<void> => {
+    const previousDataSource = process.env.DATA_SOURCE;
+    const previousDatabaseUrl = process.env.DATABASE_URL;
+    const tempDirectory = await mkdtemp(path.join(tmpdir(), 'codex-blog-api-prisma-'));
+    const databaseUrl = `file:${path.join(tempDirectory, 'api-test.db')}`;
+
+    try {
+        await createIdentitySchema(databaseUrl);
+
+        process.env.DATA_SOURCE = 'prisma';
+        process.env.DATABASE_URL = databaseUrl;
+
+        await work(databaseUrl);
+    } finally {
+        if (previousDataSource === undefined) {
+            delete process.env.DATA_SOURCE;
+        } else {
+            process.env.DATA_SOURCE = previousDataSource;
+        }
+
+        if (previousDatabaseUrl === undefined) {
+            delete process.env.DATABASE_URL;
+        } else {
+            process.env.DATABASE_URL = previousDatabaseUrl;
+        }
+
+        await rm(tempDirectory, { recursive: true, force: true });
+    }
+};
+
 describe('createApp', () => {
     it('returns health status under v1', async () => {
         const { app } = createApp();
@@ -137,6 +167,33 @@ describe('createApp', () => {
         expect(body.correlationId).toBe('missing-token-test');
     });
 
+    it('rejects protected routes with invalid and expired bearer tokens', async () => {
+        const { app } = createApp();
+        const expiredToken = await new HmacTokenService(
+            'dev-access-secret-dev-access-secret',
+            'dev-refresh-secret-dev-refresh-secret',
+            -1,
+            30
+        ).issueAccessToken({
+            kind: 'access',
+            userId: 'user-0001',
+            sessionId: 'session-0001',
+            role: 'reader',
+        });
+
+        const invalidResponse = await request(app)
+            .get('/v1/auth/me')
+            .set('authorization', 'Bearer invalid-token')
+            .expect(401);
+        const expiredResponse = await request(app)
+            .get('/v1/auth/me')
+            .set('authorization', `Bearer ${expiredToken.token}`)
+            .expect(401);
+
+        expect(problemDetailsSchema.parse(invalidResponse.body).code).toBe('INVALID_ACCESS_TOKEN');
+        expect(problemDetailsSchema.parse(expiredResponse.body).code).toBe('INVALID_ACCESS_TOKEN');
+    });
+
     it('returns the current user with a valid access token', async () => {
         const { app } = createApp();
         const registrationResponse = await request(app)
@@ -160,17 +217,7 @@ describe('createApp', () => {
     });
 
     it('uses Prisma persistence when DATA_SOURCE is prisma', async () => {
-        const previousDataSource = process.env.DATA_SOURCE;
-        const previousDatabaseUrl = process.env.DATABASE_URL;
-        const tempDirectory = await mkdtemp(path.join(tmpdir(), 'codex-blog-api-prisma-'));
-        const databaseUrl = `file:${path.join(tempDirectory, 'api-test.db')}`;
-
-        try {
-            await createIdentitySchema(databaseUrl);
-
-            process.env.DATA_SOURCE = 'prisma';
-            process.env.DATABASE_URL = databaseUrl;
-
+        await withPrismaEnvironment(async () => {
             const firstApp = createApp();
             const registrationResponse = await request(firstApp.app)
                 .post('/v1/auth/register')
@@ -195,20 +242,182 @@ describe('createApp', () => {
             await secondApp.dispose();
 
             expect(login.user.id).toBe(registration.user.id);
-        } finally {
-            if (previousDataSource === undefined) {
-                delete process.env.DATA_SOURCE;
-            } else {
-                process.env.DATA_SOURCE = previousDataSource;
-            }
+        });
+    });
 
-            if (previousDatabaseUrl === undefined) {
-                delete process.env.DATABASE_URL;
-            } else {
-                process.env.DATABASE_URL = previousDatabaseUrl;
-            }
+    it('resets passwords through the Prisma-backed auth API', async () => {
+        await withPrismaEnvironment(async (databaseUrl) => {
+            const created = createApp();
+            const registrationResponse = await request(created.app)
+                .post('/v1/auth/register')
+                .send({
+                    email: 'reset@example.com',
+                    displayName: 'Reset User',
+                    password: 'secret-123',
+                })
+                .expect(201);
+            authenticatedUserResponseSchema.parse(registrationResponse.body);
 
-            await rm(tempDirectory, { recursive: true, force: true });
-        }
+            await request(created.app)
+                .post('/v1/auth/password/forgot')
+                .send({
+                    email: 'reset@example.com',
+                })
+                .expect(204);
+
+            const prisma = createPrismaClient(databaseUrl);
+
+            try {
+                const token = await prisma.passwordResetToken.findFirstOrThrow();
+
+                await request(created.app)
+                    .post('/v1/auth/password/reset')
+                    .send({
+                        token: token.token,
+                        nextPassword: 'secret-456',
+                    })
+                    .expect(204);
+
+                await request(created.app)
+                    .post('/v1/auth/login')
+                    .send({
+                        email: 'reset@example.com',
+                        password: 'secret-123',
+                    })
+                    .expect(401);
+                await request(created.app)
+                    .post('/v1/auth/login')
+                    .send({
+                        email: 'reset@example.com',
+                        password: 'secret-456',
+                    })
+                    .expect(200);
+                await request(created.app)
+                    .post('/v1/auth/password/reset')
+                    .send({
+                        token: token.token,
+                        nextPassword: 'secret-789',
+                    })
+                    .expect(401);
+
+                await request(created.app)
+                    .post('/v1/auth/password/forgot')
+                    .send({
+                        email: 'reset@example.com',
+                    })
+                    .expect(204);
+                const expiredToken = await prisma.passwordResetToken.findFirstOrThrow();
+                await prisma.passwordResetToken.update({
+                    where: {
+                        token: expiredToken.token,
+                    },
+                    data: {
+                        expiresAt: new Date('2025-01-01T00:00:00.000Z'),
+                    },
+                });
+                await request(created.app)
+                    .post('/v1/auth/password/reset')
+                    .send({
+                        token: expiredToken.token,
+                        nextPassword: 'secret-890',
+                    })
+                    .expect(401);
+            } finally {
+                await prisma.$disconnect();
+                await created.dispose();
+            }
+        });
+    });
+
+    it('enforces user management permission boundaries through the API', async () => {
+        await withPrismaEnvironment(async (databaseUrl) => {
+            const created = createApp();
+            const adminRegistrationResponse = await request(created.app)
+                .post('/v1/auth/register')
+                .send({
+                    email: 'admin@example.com',
+                    displayName: 'Admin User',
+                    password: 'secret-123',
+                })
+                .expect(201);
+            const readerRegistrationResponse = await request(created.app)
+                .post('/v1/auth/register')
+                .send({
+                    email: 'reader@example.com',
+                    displayName: 'Reader User',
+                    password: 'secret-123',
+                })
+                .expect(201);
+            const adminRegistration = authenticatedUserResponseSchema.parse(adminRegistrationResponse.body);
+            const readerRegistration = authenticatedUserResponseSchema.parse(readerRegistrationResponse.body);
+            const prisma = createPrismaClient(databaseUrl);
+
+            try {
+                await prisma.user.update({
+                    where: {
+                        id: adminRegistration.user.id,
+                    },
+                    data: {
+                        role: 'admin',
+                    },
+                });
+
+                const adminLoginResponse = await request(created.app)
+                    .post('/v1/auth/login')
+                    .send({
+                        email: 'admin@example.com',
+                        password: 'secret-123',
+                    })
+                    .expect(200);
+                const adminLogin = authenticatedUserResponseSchema.parse(adminLoginResponse.body);
+                const adminBearer = `Bearer ${adminLogin.tokens.accessToken}`;
+                const readerBearer = `Bearer ${readerRegistration.tokens.accessToken}`;
+
+                await request(created.app).get('/v1/users').set('authorization', readerBearer).expect(403);
+                await request(created.app)
+                    .get(`/v1/users/${adminRegistration.user.id}`)
+                    .set('authorization', readerBearer)
+                    .expect(403);
+                await request(created.app)
+                    .patch(`/v1/users/${readerRegistration.user.id}/role`)
+                    .set('authorization', readerBearer)
+                    .send({
+                        role: 'author',
+                    })
+                    .expect(403);
+                await request(created.app)
+                    .patch(`/v1/users/${readerRegistration.user.id}/status`)
+                    .set('authorization', readerBearer)
+                    .send({
+                        status: 'suspended',
+                    })
+                    .expect(403);
+
+                await request(created.app).get('/v1/users').set('authorization', adminBearer).expect(200);
+                await request(created.app)
+                    .get(`/v1/users/${readerRegistration.user.id}`)
+                    .set('authorization', adminBearer)
+                    .expect(200);
+                await request(created.app)
+                    .patch(`/v1/users/${readerRegistration.user.id}/role`)
+                    .set('authorization', adminBearer)
+                    .send({
+                        role: 'author',
+                    })
+                    .expect(200);
+                const statusResponse = await request(created.app)
+                    .patch(`/v1/users/${readerRegistration.user.id}/status`)
+                    .set('authorization', adminBearer)
+                    .send({
+                        status: 'suspended',
+                    })
+                    .expect(200);
+
+                expect(userResponseSchema.parse(statusResponse.body).status).toBe('suspended');
+            } finally {
+                await prisma.$disconnect();
+                await created.dispose();
+            }
+        });
     });
 });

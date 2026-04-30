@@ -1,6 +1,6 @@
 import type { RequestHandler } from 'express';
 
-import { UnauthorizedError } from '@codex-blog/application';
+import { ApplicationError, UnauthorizedError } from '@codex-blog/application';
 import type { TokenService } from '@codex-blog/application';
 
 import type { AuthenticatedActor, RequestContextLocals } from './request-context.js';
@@ -23,7 +23,12 @@ export const requireAuth = (tokenService: TokenService): RequestHandler<unknown,
             };
             next();
         } catch (error) {
-            next(error);
+            if (error instanceof ApplicationError) {
+                next(error);
+                return;
+            }
+
+            next(new UnauthorizedError('Access token is invalid or expired.', 'INVALID_ACCESS_TOKEN'));
         }
     };
 };
