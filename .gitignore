@@ -5,7 +5,6 @@ coverage
 .env
 .env.local
 .DS_Store
-pnpm-lock.yaml
 packages/infrastructure/prisma/dev.db
 packages/infrastructure/prisma/dev.db-journal
 *.tsbuildinfo
