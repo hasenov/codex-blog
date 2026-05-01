@@ -8,7 +8,8 @@ import type { AppConfig } from '@codex-blog/config';
 import { createPrismaClient } from '@codex-blog/infrastructure';
 
 import { buildIdentityDependencies } from './build-identity-dependencies.js';
-import { buildPublishingDependencies } from './build-publishing-dependencies.js';
+import { buildEngagementDependencies } from './build-engagement-dependencies.js';
+import { buildPublishingDependencies, createPostRepository } from './build-publishing-dependencies.js';
 import { getCurrentCorrelationId } from './request-scope.js';
 import { errorHandler } from '../middleware/error-handler.js';
 import { attachRequestContext } from '../middleware/request-context.js';
@@ -39,9 +40,11 @@ export const createApp = (): CreatedApp => {
 
     const prisma = config.DATA_SOURCE === 'prisma' ? createPrismaClient(config.DATABASE_URL) : undefined;
     const identity = buildIdentityDependencies(config, getCurrentCorrelationId, prisma);
-    const publishing = buildPublishingDependencies(config, prisma);
+    const postRepository = createPostRepository(config, prisma);
+    const publishing = buildPublishingDependencies(config, prisma, postRepository);
+    const engagement = buildEngagementDependencies(config, postRepository, prisma);
 
-    app.use(config.API_PREFIX, buildV1Router(identity, publishing));
+    app.use(config.API_PREFIX, buildV1Router(identity, publishing, engagement));
     app.use(errorHandler);
 
     return {

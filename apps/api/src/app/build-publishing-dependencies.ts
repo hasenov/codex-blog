@@ -18,14 +18,18 @@ import {
     RandomIdGenerator,
     SystemClock,
 } from '@codex-blog/infrastructure';
+import type { PostRepository } from '@codex-blog/domain';
 
 type PrismaClient = ReturnType<typeof createPrismaClient>;
 
-export const buildPublishingDependencies = (config: AppConfig, prisma?: PrismaClient) => {
+export const createPostRepository = (config: AppConfig, prisma?: PrismaClient): PostRepository =>
+    config.DATA_SOURCE === 'prisma' && prisma !== undefined
+        ? new PrismaPostRepository(prisma)
+        : new InMemoryPostRepository();
+
+export const buildPublishingDependencies = (config: AppConfig, prisma?: PrismaClient, sharedPostRepository?: PostRepository) => {
     const postRepository =
-        config.DATA_SOURCE === 'prisma' && prisma !== undefined
-            ? new PrismaPostRepository(prisma)
-            : new InMemoryPostRepository();
+        sharedPostRepository ?? createPostRepository(config, prisma);
 
     const commonDependencies = {
         postRepository,

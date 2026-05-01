@@ -22,6 +22,8 @@ model User {
     passwordResets  PasswordResetToken[]
     authoredPosts   Post[]         @relation("PostAuthor")
     postRevisions   PostRevision[] @relation("PostRevisionCreator")
+    comments        Comment[]      @relation("CommentAuthor")
+    moderatedComments Comment[]    @relation("CommentModerator")
 
     @@map("users")
 }
@@ -43,12 +45,42 @@ model Post {
 
     author    User           @relation("PostAuthor", fields: [authorId], references: [id], onDelete: Cascade)
     revisions PostRevision[]
+    comments  Comment[]
 
     @@index([authorId])
     @@index([status])
     @@index([publishedAt])
     @@index([scheduledFor])
     @@map("posts")
+}
+
+model Comment {
+    id                String    @id
+    postId            String
+    authorId          String
+    parentId          String?
+    body              String
+    status            String
+    approvedAt        DateTime?
+    rejectedAt        DateTime?
+    deletedAt         DateTime?
+    moderatedAt       DateTime?
+    moderatedByUserId String?
+    createdAt         DateTime
+    updatedAt         DateTime
+
+    post        Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+    author      User      @relation("CommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+    moderator   User?     @relation("CommentModerator", fields: [moderatedByUserId], references: [id], onDelete: SetNull)
+    parent      Comment?  @relation("CommentThread", fields: [parentId], references: [id], onDelete: Cascade)
+    replies     Comment[] @relation("CommentThread")
+
+    @@index([postId])
+    @@index([authorId])
+    @@index([parentId])
+    @@index([status])
+    @@index([moderatedByUserId])
+    @@map("comments")
 }
 
 model PostRevision {

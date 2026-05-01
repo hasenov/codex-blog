@@ -1,3 +1,6 @@
+export * from './engagement/dto.js';
+export * from './engagement/mappers.js';
+export * from './engagement/use-cases.js';
 export * from './identity/dto.js';
 export * from './identity/mappers.js';
 export * from './identity/ports/password-reset-token-store.js';

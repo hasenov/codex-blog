@@ -1,3 +1,5 @@
+export * from './engagement/repositories/in-memory-engagement.js';
+export * from './engagement/repositories/prisma-engagement.js';
 export * from './identity/repositories/in-memory-identity.js';
 export * from './identity/repositories/prisma-identity.js';
 export * from './publishing/repositories/in-memory-publishing.js';

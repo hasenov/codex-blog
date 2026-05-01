@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { z } from 'zod';
 
-import { authenticatedUserResponseSchema, paginatedPostsResponseSchema, postResponseSchema, userResponseSchema } from '@codex-blog/contracts';
+import {
+    authenticatedUserResponseSchema,
+    commentResponseSchema,
+    commentsResponseSchema,
+    paginatedPostsResponseSchema,
+    postResponseSchema,
+    userResponseSchema,
+} from '@codex-blog/contracts';
 import { createPrismaClient, HmacTokenService } from '@codex-blog/infrastructure';
 
 import { withPrismaApiTestDatabase } from './api-test-database.js';
@@ -610,6 +617,198 @@ describe('createApp', () => {
                 expect(problemDetailsSchema.parse(invalidContentResponse.body).code).toBe('VALIDATION_ERROR');
                 expect(problemDetailsSchema.parse(duplicateSlugResponse.body).code).toBe('POST_SLUG_ALREADY_EXISTS');
                 expect(problemDetailsSchema.parse(invalidScheduleResponse.body).code).toBe('INVALID_SCHEDULED_DATE');
+            } finally {
+                await prisma.$disconnect();
+                await created.dispose();
+            }
+        });
+    });
+
+    it('manages comment moderation through the Prisma-backed API', async () => {
+        await withPrismaApiTestDatabase(async (databaseUrl) => {
+            const created = createApp();
+            const authorResponse = await request(created.app)
+                .post('/v1/auth/register')
+                .send({
+                    email: 'comments-author@example.com',
+                    displayName: 'Comments Author',
+                    password: 'secret-123',
+                })
+                .expect(201);
+            const editorResponse = await request(created.app)
+                .post('/v1/auth/register')
+                .send({
+                    email: 'comments-editor@example.com',
+                    displayName: 'Comments Editor',
+                    password: 'secret-123',
+                })
+                .expect(201);
+            const readerResponse = await request(created.app)
+                .post('/v1/auth/register')
+                .send({
+                    email: 'comments-reader@example.com',
+                    displayName: 'Comments Reader',
+                    password: 'secret-123',
+                })
+                .expect(201);
+            const otherReaderResponse = await request(created.app)
+                .post('/v1/auth/register')
+                .send({
+                    email: 'comments-other-reader@example.com',
+                    displayName: 'Other Comments Reader',
+                    password: 'secret-123',
+                })
+                .expect(201);
+            const author = authenticatedUserResponseSchema.parse(authorResponse.body);
+            const editor = authenticatedUserResponseSchema.parse(editorResponse.body);
+            const reader = authenticatedUserResponseSchema.parse(readerResponse.body);
+            const otherReader = authenticatedUserResponseSchema.parse(otherReaderResponse.body);
+            const prisma = createPrismaClient(databaseUrl);
+
+            try {
+                await prisma.user.update({
+                    where: {
+                        id: author.user.id,
+                    },
+                    data: {
+                        role: 'author',
+                    },
+                });
+                await prisma.user.update({
+                    where: {
+                        id: editor.user.id,
+                    },
+                    data: {
+                        role: 'editor',
+                    },
+                });
+
+                const authorLoginResponse = await request(created.app)
+                    .post('/v1/auth/login')
+                    .send({
+                        email: 'comments-author@example.com',
+                        password: 'secret-123',
+                    })
+                    .expect(200);
+                const editorLoginResponse = await request(created.app)
+                    .post('/v1/auth/login')
+                    .send({
+                        email: 'comments-editor@example.com',
+                        password: 'secret-123',
+                    })
+                    .expect(200);
+                const authorBearer = `Bearer ${authenticatedUserResponseSchema.parse(authorLoginResponse.body).tokens.accessToken}`;
+                const editorBearer = `Bearer ${authenticatedUserResponseSchema.parse(editorLoginResponse.body).tokens.accessToken}`;
+                const readerBearer = `Bearer ${reader.tokens.accessToken}`;
+                const otherReaderBearer = `Bearer ${otherReader.tokens.accessToken}`;
+                const draftResponse = await request(created.app)
+                    .post('/v1/posts')
+                    .set('authorization', authorBearer)
+                    .send({
+                        title: 'Commentable post',
+                        slug: 'commentable-post',
+                        excerpt: 'Commentable excerpt',
+                        content: {
+                            version: 1,
+                            blocks: [{ type: 'paragraph', text: 'Commentable content' }],
+                        },
+                        seo: {},
+                    })
+                    .expect(201);
+                const draft = postResponseSchema.parse(draftResponse.body);
+                await request(created.app)
+                    .post(`/v1/posts/${draft.id}/publish`)
+                    .set('authorization', editorBearer)
+                    .expect(200);
+
+                await request(created.app)
+                    .post('/v1/posts/commentable-post/comments')
+                    .send({
+                        body: 'No token',
+                    })
+                    .expect(401);
+                const createdCommentResponse = await request(created.app)
+                    .post('/v1/posts/commentable-post/comments')
+                    .set('authorization', readerBearer)
+                    .send({
+                        body: 'First public thought',
+                    })
+                    .expect(201);
+                const comment = commentResponseSchema.parse(createdCommentResponse.body);
+
+                expect(comment.status).toBe('pending');
+                expect(commentsResponseSchema.parse((await request(created.app).get('/v1/posts/commentable-post/comments').expect(200)).body)).toHaveLength(0);
+
+                await request(created.app)
+                    .post(`/v1/comments/${comment.id}/moderate`)
+                    .set('authorization', readerBearer)
+                    .send({
+                        status: 'approved',
+                    })
+                    .expect(403);
+                const approvedResponse = await request(created.app)
+                    .post(`/v1/comments/${comment.id}/moderate`)
+                    .set('authorization', editorBearer)
+                    .send({
+                        status: 'approved',
+                    })
+                    .expect(200);
+
+                expect(commentResponseSchema.parse(approvedResponse.body).status).toBe('approved');
+                expect(commentsResponseSchema.parse((await request(created.app).get('/v1/posts/commentable-post/comments').expect(200)).body)).toHaveLength(1);
+
+                await request(created.app)
+                    .patch(`/v1/comments/${comment.id}`)
+                    .set('authorization', otherReaderBearer)
+                    .send({
+                        body: 'Hijacked',
+                    })
+                    .expect(403);
+                const updatedResponse = await request(created.app)
+                    .patch(`/v1/comments/${comment.id}`)
+                    .set('authorization', readerBearer)
+                    .send({
+                        body: 'Edited thought',
+                    })
+                    .expect(200);
+
+                expect(commentResponseSchema.parse(updatedResponse.body).status).toBe('pending');
+                await request(created.app)
+                    .post(`/v1/comments/${comment.id}/moderate`)
+                    .set('authorization', editorBearer)
+                    .send({
+                        status: 'approved',
+                    })
+                    .expect(200);
+
+                const replyResponse = await request(created.app)
+                    .post('/v1/posts/commentable-post/comments')
+                    .set('authorization', otherReaderBearer)
+                    .send({
+                        parentId: comment.id,
+                        body: 'Reply',
+                    })
+                    .expect(201);
+                const reply = commentResponseSchema.parse(replyResponse.body);
+
+                await request(created.app)
+                    .post('/v1/posts/commentable-post/comments')
+                    .set('authorization', readerBearer)
+                    .send({
+                        parentId: reply.id,
+                        body: 'Too deep',
+                    })
+                    .expect(400);
+                await request(created.app)
+                    .delete(`/v1/comments/${comment.id}`)
+                    .set('authorization', otherReaderBearer)
+                    .expect(403);
+                await request(created.app)
+                    .delete(`/v1/comments/${comment.id}`)
+                    .set('authorization', editorBearer)
+                    .expect(204);
+
+                expect(commentsResponseSchema.parse((await request(created.app).get('/v1/posts/commentable-post/comments').expect(200)).body)).toHaveLength(0);
             } finally {
                 await prisma.$disconnect();
                 await created.dispose();
