@@ -2,6 +2,7 @@ import type { Clock, IdGenerator, PostDto } from '@codex-blog/application';
 import { Post, type ListPublishedPostsOptions, type PostRepository, type Slug } from '@codex-blog/domain';
 
 import { InMemoryTransactionManager } from '@codex-blog/infrastructure';
+import { InMemoryCategoryRepository, InMemoryTagRepository } from '@codex-blog/infrastructure';
 
 export class InMemoryPostRepository implements PostRepository {
     private readonly posts = new Map<string, Post>();
@@ -69,6 +70,8 @@ class SequenceIdGenerator implements IdGenerator {
 export const createPublishingTestContext = () => {
     const clock = new FixedClock();
     const postRepository = new InMemoryPostRepository();
+    const categoryRepository = new InMemoryCategoryRepository();
+    const tagRepository = new InMemoryTagRepository();
 
     return {
         actor: {
@@ -77,14 +80,18 @@ export const createPublishingTestContext = () => {
             editor: { role: 'editor', userId: 'editor-0001' },
             reader: { role: 'reader', userId: 'reader-0001' },
         } as const,
+        categoryRepository,
         clock,
         dependencies: {
             clock,
+            categoryRepository,
             idGenerator: new SequenceIdGenerator(),
             postRepository,
+            tagRepository,
             transactionManager: new InMemoryTransactionManager(),
         },
         postRepository,
+        tagRepository,
     };
 };
 

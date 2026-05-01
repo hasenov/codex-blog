@@ -31,6 +31,7 @@ model User {
 model Post {
     id            String    @id
     authorId      String
+    categoryId    String?
     title         String
     slug          String    @unique
     excerpt       String
@@ -44,14 +45,59 @@ model Post {
     updatedAt     DateTime
 
     author    User           @relation("PostAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+    category  Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
     revisions PostRevision[]
     comments  Comment[]
+    tags      PostTag[]
 
     @@index([authorId])
+    @@index([categoryId])
     @@index([status])
     @@index([publishedAt])
     @@index([scheduledFor])
     @@map("posts")
+}
+
+model Category {
+    id         String    @id
+    name       String
+    slug       String    @unique
+    status     String
+    archivedAt DateTime?
+    createdAt  DateTime
+    updatedAt  DateTime
+
+    posts Post[]
+
+    @@index([status])
+    @@map("categories")
+}
+
+model Tag {
+    id         String    @id
+    name       String
+    slug       String    @unique
+    status     String
+    archivedAt DateTime?
+    createdAt  DateTime
+    updatedAt  DateTime
+
+    posts PostTag[]
+
+    @@index([status])
+    @@map("tags")
+}
+
+model PostTag {
+    postId String
+    tagId  String
+
+    post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+    tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+    @@id([postId, tagId])
+    @@index([tagId])
+    @@map("post_tags")
 }
 
 model Comment {

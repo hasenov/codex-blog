@@ -68,12 +68,14 @@ export const postRevisionResponseSchema = z.object({
 export const postResponseSchema = z.object({
     id: z.string().min(1),
     authorId: z.string().min(1),
+    categoryId: z.string().min(1).optional(),
     title: z.string().min(3),
     slug: z.string().min(1),
     excerpt: z.string().max(500),
     content: richContentSchema,
     seo: seoMetadataSchema,
     status: postStatusSchema,
+    tagIds: z.array(z.string().min(1)),
     revisions: z.array(postRevisionResponseSchema),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
@@ -84,18 +86,22 @@ export const postResponseSchema = z.object({
 
 export const createPostRequestSchema = z.object({
     authorId: z.string().min(8).optional(),
+    categoryId: z.string().min(1).optional(),
     title: z.string().min(3).max(160),
     slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
     excerpt: z.string().max(500),
     content: richContentSchema,
     seo: seoMetadataSchema.default({}),
+    tagIds: z.array(z.string().min(1)).max(20).default([]),
 });
 
 export const updatePostRequestSchema = z.object({
+    categoryId: z.string().min(1).optional(),
     title: z.string().min(3).max(160),
     excerpt: z.string().max(500),
     content: richContentSchema,
     seo: seoMetadataSchema.default({}),
+    tagIds: z.array(z.string().min(1)).max(20).default([]),
 });
 
 export const schedulePostRequestSchema = z.object({

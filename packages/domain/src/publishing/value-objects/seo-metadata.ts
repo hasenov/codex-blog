@@ -1,12 +1,12 @@
 import { DomainError } from '../../shared/errors/domain-error.js';
 
 export interface SeoMetadataProps {
-    canonicalUrl?: string;
-    description?: string;
-    ogDescription?: string;
-    ogImageUrl?: string;
-    ogTitle?: string;
-    title?: string;
+    canonicalUrl?: string | undefined;
+    description?: string | undefined;
+    ogDescription?: string | undefined;
+    ogImageUrl?: string | undefined;
+    ogTitle?: string | undefined;
+    title?: string | undefined;
 }
 
 const ensureOptionalLength = (value: string | undefined, maxLength: number, code: string): string | undefined => {

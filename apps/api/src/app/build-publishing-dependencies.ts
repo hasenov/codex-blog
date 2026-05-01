@@ -10,6 +10,7 @@ import {
     UpdateDraftPostUseCase,
 } from '@codex-blog/application';
 import type { AppConfig } from '@codex-blog/config';
+import type { CategoryRepository, PostRepository, TagRepository } from '@codex-blog/domain';
 import {
     type createPrismaClient,
     InMemoryPostRepository,
@@ -18,7 +19,6 @@ import {
     RandomIdGenerator,
     SystemClock,
 } from '@codex-blog/infrastructure';
-import type { PostRepository } from '@codex-blog/domain';
 
 type PrismaClient = ReturnType<typeof createPrismaClient>;
 
@@ -27,12 +27,18 @@ export const createPostRepository = (config: AppConfig, prisma?: PrismaClient): 
         ? new PrismaPostRepository(prisma)
         : new InMemoryPostRepository();
 
-export const buildPublishingDependencies = (config: AppConfig, prisma?: PrismaClient, sharedPostRepository?: PostRepository) => {
+export const buildPublishingDependencies = (
+    config: AppConfig,
+    prisma?: PrismaClient,
+    sharedPostRepository?: PostRepository,
+    taxonomyRepositories?: { categoryRepository: CategoryRepository; tagRepository: TagRepository }
+) => {
     const postRepository =
         sharedPostRepository ?? createPostRepository(config, prisma);
 
     const commonDependencies = {
         postRepository,
+        ...(taxonomyRepositories === undefined ? {} : taxonomyRepositories),
         idGenerator: new RandomIdGenerator(),
         clock: new SystemClock(),
         transactionManager: new InMemoryTransactionManager(),

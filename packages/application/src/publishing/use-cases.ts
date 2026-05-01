@@ -13,6 +13,8 @@ import {
     Slug,
     UtcDateTime,
     type PostRepository,
+    type CategoryRepository,
+    type TagRepository,
 } from '@codex-blog/domain';
 
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from '../shared/errors/application-error.js';
@@ -24,25 +26,31 @@ interface PublishingUseCaseDependencies {
     clock: Clock;
     idGenerator: IdGenerator;
     postRepository: PostRepository;
+    categoryRepository?: CategoryRepository;
+    tagRepository?: TagRepository;
     transactionManager: TransactionManager;
 }
 
 interface CreateDraftPostInput {
     actor: PublishingActorDto;
-    authorId?: string;
+    authorId?: string | undefined;
+    categoryId?: string | undefined;
     content: RichContentDto;
     excerpt: string;
     seo: SeoMetadataDto;
     slug: string;
+    tagIds?: string[] | undefined;
     title: string;
 }
 
 interface UpdateDraftPostInput {
     actor: PublishingActorDto;
+    categoryId?: string | undefined;
     content: RichContentDto;
     excerpt: string;
     postId: string;
     seo: SeoMetadataDto;
+    tagIds?: string[] | undefined;
     title: string;
 }
 
@@ -92,6 +100,51 @@ const buildEditableContent = (input: {
     seo: SeoMetadata.create(input.seo),
 });
 
+const uniqueIds = (ids: string[]): string[] => Array.from(new Set(ids));
+
+const resolveCategoryId = async (
+    repository: CategoryRepository | undefined,
+    categoryId: string | undefined
+): Promise<EntityId | undefined> => {
+    if (categoryId === undefined) {
+        return undefined;
+    }
+
+    if (repository === undefined) {
+        return EntityId.create(categoryId);
+    }
+
+    const category = await repository.findById(categoryId);
+
+    if (category === null || category.status !== 'active') {
+        throw new BadRequestError('Category is not active or was not found.', 'CATEGORY_NOT_ACTIVE');
+    }
+
+    return category.id;
+};
+
+const resolveTagIds = async (repository: TagRepository | undefined, tagIds: string[] | undefined): Promise<EntityId[]> => {
+    const ids = uniqueIds(tagIds ?? []);
+
+    if (repository === undefined) {
+        return ids.map((tagId) => EntityId.create(tagId));
+    }
+
+    const tags = await Promise.all(ids.map((tagId) => repository.findById(tagId)));
+
+    if (tags.some((tag) => tag === null || tag.status !== 'active')) {
+        throw new BadRequestError('All tags must be active and existing.', 'TAG_NOT_ACTIVE');
+    }
+
+    return tags.map((tag) => {
+        if (tag === null) {
+            throw new BadRequestError('All tags must be active and existing.', 'TAG_NOT_ACTIVE');
+        }
+
+        return tag.id;
+    });
+};
+
 const findPostOrThrow = async (repository: PostRepository, postId: string): Promise<Post> => {
     const post = await repository.findById(postId);
 
@@ -119,14 +172,18 @@ export class CreateDraftPostUseCase {
 
                 const now = UtcDateTime.create(this.dependencies.clock.now());
                 const editable = buildEditableContent(input);
+                const categoryId = await resolveCategoryId(this.dependencies.categoryRepository, input.categoryId);
+                const tagIds = await resolveTagIds(this.dependencies.tagRepository, input.tagIds);
                 const post = Post.createDraft({
                     id: EntityId.create(this.dependencies.idGenerator.generate()),
                     authorId,
+                    ...(categoryId === undefined ? {} : { categoryId }),
                     slug,
                     title: editable.title,
                     excerpt: input.excerpt,
                     content: editable.content,
                     seo: editable.seo,
+                    tagIds,
                     createdAt: now,
                     initialRevisionId: EntityId.create(this.dependencies.idGenerator.generate()),
                 });
@@ -150,12 +207,16 @@ export class UpdateDraftPostUseCase {
                 assertCanUpdateDraftPost(input.actor, post);
                 const now = UtcDateTime.create(this.dependencies.clock.now());
                 const editable = buildEditableContent(input);
+                const categoryId = await resolveCategoryId(this.dependencies.categoryRepository, input.categoryId);
+                const tagIds = await resolveTagIds(this.dependencies.tagRepository, input.tagIds);
 
                 post.updateDraft({
                     title: editable.title,
+                    ...(categoryId === undefined ? {} : { categoryId }),
                     excerpt: input.excerpt,
                     content: editable.content,
                     seo: editable.seo,
+                    tagIds,
                     revisionId: EntityId.create(this.dependencies.idGenerator.generate()),
                     updatedAt: now,
                     updatedByUserId: EntityId.create(input.actor.userId),

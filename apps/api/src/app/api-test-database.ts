@@ -62,6 +62,7 @@ export const createApiTestSchema = async (databaseUrl: string): Promise<void> =>
             CREATE TABLE "posts" (
                 "id" TEXT NOT NULL PRIMARY KEY,
                 "authorId" TEXT NOT NULL,
+                "categoryId" TEXT,
                 "title" TEXT NOT NULL,
                 "slug" TEXT NOT NULL,
                 "excerpt" TEXT NOT NULL,
@@ -73,14 +74,52 @@ export const createApiTestSchema = async (databaseUrl: string): Promise<void> =>
                 "archivedAt" DATETIME,
                 "createdAt" DATETIME NOT NULL,
                 "updatedAt" DATETIME NOT NULL,
-                CONSTRAINT "posts_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+                CONSTRAINT "posts_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+                CONSTRAINT "posts_categoryId_fkey" FOREIGN KEY ("categoryId") REFERENCES "categories" ("id") ON DELETE SET NULL ON UPDATE CASCADE
             )
         `;
         await prisma.$executeRaw`CREATE UNIQUE INDEX "posts_slug_key" ON "posts" ("slug")`;
         await prisma.$executeRaw`CREATE INDEX "posts_authorId_idx" ON "posts" ("authorId")`;
+        await prisma.$executeRaw`CREATE INDEX "posts_categoryId_idx" ON "posts" ("categoryId")`;
         await prisma.$executeRaw`CREATE INDEX "posts_status_idx" ON "posts" ("status")`;
         await prisma.$executeRaw`CREATE INDEX "posts_publishedAt_idx" ON "posts" ("publishedAt")`;
         await prisma.$executeRaw`CREATE INDEX "posts_scheduledFor_idx" ON "posts" ("scheduledFor")`;
+        await prisma.$executeRaw`
+            CREATE TABLE "categories" (
+                "id" TEXT NOT NULL PRIMARY KEY,
+                "name" TEXT NOT NULL,
+                "slug" TEXT NOT NULL,
+                "status" TEXT NOT NULL,
+                "archivedAt" DATETIME,
+                "createdAt" DATETIME NOT NULL,
+                "updatedAt" DATETIME NOT NULL
+            )
+        `;
+        await prisma.$executeRaw`CREATE UNIQUE INDEX "categories_slug_key" ON "categories" ("slug")`;
+        await prisma.$executeRaw`CREATE INDEX "categories_status_idx" ON "categories" ("status")`;
+        await prisma.$executeRaw`
+            CREATE TABLE "tags" (
+                "id" TEXT NOT NULL PRIMARY KEY,
+                "name" TEXT NOT NULL,
+                "slug" TEXT NOT NULL,
+                "status" TEXT NOT NULL,
+                "archivedAt" DATETIME,
+                "createdAt" DATETIME NOT NULL,
+                "updatedAt" DATETIME NOT NULL
+            )
+        `;
+        await prisma.$executeRaw`CREATE UNIQUE INDEX "tags_slug_key" ON "tags" ("slug")`;
+        await prisma.$executeRaw`CREATE INDEX "tags_status_idx" ON "tags" ("status")`;
+        await prisma.$executeRaw`
+            CREATE TABLE "post_tags" (
+                "postId" TEXT NOT NULL,
+                "tagId" TEXT NOT NULL,
+                CONSTRAINT "post_tags_postId_fkey" FOREIGN KEY ("postId") REFERENCES "posts" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+                CONSTRAINT "post_tags_tagId_fkey" FOREIGN KEY ("tagId") REFERENCES "tags" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+                PRIMARY KEY ("postId", "tagId")
+            )
+        `;
+        await prisma.$executeRaw`CREATE INDEX "post_tags_tagId_idx" ON "post_tags" ("tagId")`;
         await prisma.$executeRaw`
             CREATE TABLE "post_revisions" (
                 "id" TEXT NOT NULL PRIMARY KEY,

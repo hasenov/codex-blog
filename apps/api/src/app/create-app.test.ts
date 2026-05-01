@@ -8,6 +8,8 @@ import {
     commentsResponseSchema,
     paginatedPostsResponseSchema,
     postResponseSchema,
+    taxonomyItemResponseSchema,
+    taxonomyItemsResponseSchema,
     userResponseSchema,
 } from '@codex-blog/contracts';
 import { createPrismaClient, HmacTokenService } from '@codex-blog/infrastructure';
@@ -809,6 +811,176 @@ describe('createApp', () => {
                     .expect(204);
 
                 expect(commentsResponseSchema.parse((await request(created.app).get('/v1/posts/commentable-post/comments').expect(200)).body)).toHaveLength(0);
+            } finally {
+                await prisma.$disconnect();
+                await created.dispose();
+            }
+        });
+    });
+
+    it('manages taxonomy and assigns it to posts through the Prisma-backed API', async () => {
+        await withPrismaApiTestDatabase(async (databaseUrl) => {
+            const created = createApp();
+            const authorResponse = await request(created.app)
+                .post('/v1/auth/register')
+                .send({
+                    email: 'taxonomy-author@example.com',
+                    displayName: 'Taxonomy Author',
+                    password: 'secret-123',
+                })
+                .expect(201);
+            const editorResponse = await request(created.app)
+                .post('/v1/auth/register')
+                .send({
+                    email: 'taxonomy-editor@example.com',
+                    displayName: 'Taxonomy Editor',
+                    password: 'secret-123',
+                })
+                .expect(201);
+            const readerResponse = await request(created.app)
+                .post('/v1/auth/register')
+                .send({
+                    email: 'taxonomy-reader@example.com',
+                    displayName: 'Taxonomy Reader',
+                    password: 'secret-123',
+                })
+                .expect(201);
+            const author = authenticatedUserResponseSchema.parse(authorResponse.body);
+            const editor = authenticatedUserResponseSchema.parse(editorResponse.body);
+            const reader = authenticatedUserResponseSchema.parse(readerResponse.body);
+            const prisma = createPrismaClient(databaseUrl);
+
+            try {
+                await prisma.user.update({
+                    where: {
+                        id: author.user.id,
+                    },
+                    data: {
+                        role: 'author',
+                    },
+                });
+                await prisma.user.update({
+                    where: {
+                        id: editor.user.id,
+                    },
+                    data: {
+                        role: 'editor',
+                    },
+                });
+
+                const authorLoginResponse = await request(created.app)
+                    .post('/v1/auth/login')
+                    .send({
+                        email: 'taxonomy-author@example.com',
+                        password: 'secret-123',
+                    })
+                    .expect(200);
+                const editorLoginResponse = await request(created.app)
+                    .post('/v1/auth/login')
+                    .send({
+                        email: 'taxonomy-editor@example.com',
+                        password: 'secret-123',
+                    })
+                    .expect(200);
+                const authorBearer = `Bearer ${authenticatedUserResponseSchema.parse(authorLoginResponse.body).tokens.accessToken}`;
+                const editorBearer = `Bearer ${authenticatedUserResponseSchema.parse(editorLoginResponse.body).tokens.accessToken}`;
+                const readerBearer = `Bearer ${reader.tokens.accessToken}`;
+
+                await request(created.app)
+                    .post('/v1/categories')
+                    .set('authorization', readerBearer)
+                    .send({
+                        name: 'Reader Category',
+                        slug: 'reader-category',
+                    })
+                    .expect(403);
+                const categoryResponse = await request(created.app)
+                    .post('/v1/categories')
+                    .set('authorization', editorBearer)
+                    .send({
+                        name: 'Engineering',
+                        slug: 'engineering',
+                    })
+                    .expect(201);
+                const tagResponse = await request(created.app)
+                    .post('/v1/tags')
+                    .set('authorization', editorBearer)
+                    .send({
+                        name: 'TypeScript',
+                        slug: 'typescript',
+                    })
+                    .expect(201);
+                const category = taxonomyItemResponseSchema.parse(categoryResponse.body);
+                const tag = taxonomyItemResponseSchema.parse(tagResponse.body);
+
+                expect(taxonomyItemsResponseSchema.parse((await request(created.app).get('/v1/categories').expect(200)).body)).toHaveLength(1);
+                expect(taxonomyItemResponseSchema.parse((await request(created.app).get('/v1/categories/engineering').expect(200)).body).id).toBe(
+                    category.id
+                );
+                expect(taxonomyItemsResponseSchema.parse((await request(created.app).get('/v1/tags').expect(200)).body)).toHaveLength(1);
+                expect(taxonomyItemResponseSchema.parse((await request(created.app).get('/v1/tags/typescript').expect(200)).body).id).toBe(tag.id);
+
+                const postResponse = await request(created.app)
+                    .post('/v1/posts')
+                    .set('authorization', authorBearer)
+                    .send({
+                        title: 'Classified post',
+                        slug: 'classified-post',
+                        excerpt: 'Classified excerpt',
+                        categoryId: category.id,
+                        tagIds: [tag.id],
+                        content: {
+                            version: 1,
+                            blocks: [{ type: 'paragraph', text: 'Classified content' }],
+                        },
+                        seo: {},
+                    })
+                    .expect(201);
+                const post = postResponseSchema.parse(postResponse.body);
+
+                expect(post.categoryId).toBe(category.id);
+                expect(post.tagIds).toEqual([tag.id]);
+
+                await request(created.app)
+                    .patch(`/v1/tags/${tag.id}`)
+                    .set('authorization', editorBearer)
+                    .send({
+                        name: 'Node.js',
+                        slug: 'node-js',
+                    })
+                    .expect(200);
+                await request(created.app).get('/v1/tags/typescript').expect(404);
+                await request(created.app).get('/v1/tags/node-js').expect(200);
+                await request(created.app)
+                    .delete(`/v1/tags/${tag.id}`)
+                    .set('authorization', editorBearer)
+                    .expect(204);
+                expect(taxonomyItemsResponseSchema.parse((await request(created.app).get('/v1/tags').expect(200)).body)).toHaveLength(0);
+                await request(created.app)
+                    .patch(`/v1/posts/${post.id}`)
+                    .set('authorization', authorBearer)
+                    .send({
+                        title: 'Rejected taxonomy post',
+                        excerpt: 'Rejected excerpt',
+                        tagIds: [tag.id],
+                        content: {
+                            version: 1,
+                            blocks: [{ type: 'paragraph', text: 'Rejected content' }],
+                        },
+                        seo: {},
+                    })
+                    .expect(400);
+
+                const duplicateCategoryResponse = await request(created.app)
+                    .post('/v1/categories')
+                    .set('authorization', editorBearer)
+                    .send({
+                        name: 'Duplicate Engineering',
+                        slug: 'engineering',
+                    })
+                    .expect(409);
+
+                expect(problemDetailsSchema.parse(duplicateCategoryResponse.body).code).toBe('CATEGORY_SLUG_ALREADY_EXISTS');
             } finally {
                 await prisma.$disconnect();
                 await created.dispose();

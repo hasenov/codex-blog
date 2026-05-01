@@ -6,3 +6,5 @@ export * from './publishing/repositories/in-memory-publishing.js';
 export * from './publishing/repositories/prisma-publishing.js';
 export * from './prisma/client.js';
 export * from './shared/services.js';
+export * from './taxonomy/repositories/in-memory-taxonomy.js';
+export * from './taxonomy/repositories/prisma-taxonomy.js';

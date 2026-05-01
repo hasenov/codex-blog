@@ -19,6 +19,7 @@ import {
 interface PostRecord {
     archivedAt: Date | null;
     authorId: string;
+    categoryId: string | null;
     contentJson: string;
     createdAt: Date;
     excerpt: string;
@@ -29,8 +30,13 @@ interface PostRecord {
     seoJson: string;
     slug: string;
     status: string;
+    tags: PostTagRecord[];
     title: string;
     updatedAt: Date;
+}
+
+interface PostTagRecord {
+    tagId: string;
 }
 
 interface PostRevisionRecord {
@@ -68,16 +74,19 @@ const toPost = (record: PostRecord): Post => {
     const publishedAt = record.publishedAt === null ? undefined : UtcDateTime.create(record.publishedAt);
     const scheduledFor = record.scheduledFor === null ? undefined : UtcDateTime.create(record.scheduledFor);
     const archivedAt = record.archivedAt === null ? undefined : UtcDateTime.create(record.archivedAt);
+    const categoryId = record.categoryId === null ? undefined : EntityId.create(record.categoryId);
 
     return Post.rehydrate({
         id: EntityId.create(record.id),
         authorId: EntityId.create(record.authorId),
+        ...(categoryId === undefined ? {} : { categoryId }),
         title: PostTitle.create(record.title),
         slug: Slug.create(record.slug),
         excerpt: record.excerpt,
         content: parseRichContent(record.contentJson),
         seo: parseSeoMetadata(record.seoJson),
         status: record.status as PostStatus,
+        tagIds: record.tags.map((tag) => EntityId.create(tag.tagId)),
         revisions: record.revisions
             .slice()
             .sort((left, right) => left.number - right.number)
@@ -110,6 +119,7 @@ export class PrismaPostRepository implements PostRepository {
             },
             include: {
                 revisions: true,
+                tags: true,
             },
         });
 
@@ -123,6 +133,7 @@ export class PrismaPostRepository implements PostRepository {
             },
             include: {
                 revisions: true,
+                tags: true,
             },
         });
 
@@ -136,6 +147,7 @@ export class PrismaPostRepository implements PostRepository {
             },
             include: {
                 revisions: true,
+                tags: true,
             },
             orderBy: [{ publishedAt: 'desc' }, { id: 'asc' }],
         });
@@ -157,6 +169,7 @@ export class PrismaPostRepository implements PostRepository {
                 create: {
                     id: props.id.toString(),
                     authorId: props.authorId.toString(),
+                    categoryId: props.categoryId?.toString() ?? null,
                     title: props.title.toString(),
                     slug: props.slug.toString(),
                     excerpt: props.excerpt,
@@ -171,6 +184,7 @@ export class PrismaPostRepository implements PostRepository {
                 },
                 update: {
                     authorId: props.authorId.toString(),
+                    categoryId: props.categoryId?.toString() ?? null,
                     title: props.title.toString(),
                     slug: props.slug.toString(),
                     excerpt: props.excerpt,
@@ -188,6 +202,20 @@ export class PrismaPostRepository implements PostRepository {
                     postId: props.id.toString(),
                 },
             });
+            await transaction.postTag.deleteMany({
+                where: {
+                    postId: props.id.toString(),
+                },
+            });
+
+            for (const tagId of props.tagIds) {
+                await transaction.postTag.create({
+                    data: {
+                        postId: props.id.toString(),
+                        tagId: tagId.toString(),
+                    },
+                });
+            }
 
             for (const revision of props.revisions) {
                 await transaction.postRevision.create({

@@ -1,5 +1,5 @@
 import { DomainError } from '../../shared/errors/domain-error.js';
-import type { EntityId } from '../../shared/value-objects/entity-id.js';
+import { EntityId } from '../../shared/value-objects/entity-id.js';
 import type { Slug } from '../../shared/value-objects/slug.js';
 import type { UtcDateTime } from '../../shared/value-objects/utc-date-time.js';
 import type { PostStatus } from '../publishing.types.js';
@@ -10,6 +10,7 @@ import type { SeoMetadata } from '../value-objects/seo-metadata.js';
 
 export interface CreatePostDraftProps {
     authorId: EntityId;
+    categoryId?: EntityId;
     content: RichContent;
     createdAt: UtcDateTime;
     excerpt: string;
@@ -17,12 +18,14 @@ export interface CreatePostDraftProps {
     initialRevisionId: EntityId;
     seo: SeoMetadata;
     slug: Slug;
+    tagIds?: EntityId[];
     title: PostTitle;
 }
 
 export interface PostProps {
     archivedAt?: UtcDateTime;
     authorId: EntityId;
+    categoryId?: EntityId;
     content: RichContent;
     createdAt: UtcDateTime;
     excerpt: string;
@@ -33,15 +36,18 @@ export interface PostProps {
     seo: SeoMetadata;
     slug: Slug;
     status: PostStatus;
+    tagIds: EntityId[];
     title: PostTitle;
     updatedAt: UtcDateTime;
 }
 
 export interface UpdatePostDraftProps {
+    categoryId?: EntityId;
     content: RichContent;
     excerpt: string;
     revisionId: EntityId;
     seo: SeoMetadata;
+    tagIds?: EntityId[];
     title: PostTitle;
     updatedAt: UtcDateTime;
     updatedByUserId: EntityId;
@@ -82,12 +88,14 @@ export class Post {
         return new Post({
             id: props.id,
             authorId: props.authorId,
+            ...(props.categoryId === undefined ? {} : { categoryId: props.categoryId }),
             title: props.title,
             slug: props.slug,
             excerpt: normalizeExcerpt(props.excerpt),
             content: props.content,
             seo: props.seo,
             status: 'draft',
+            tagIds: props.tagIds ?? [],
             revisions: [revision],
             createdAt: props.createdAt,
             updatedAt: props.createdAt,
@@ -104,6 +112,10 @@ export class Post {
 
     public get authorId(): EntityId {
         return this.props.authorId;
+    }
+
+    public get categoryId(): EntityId | undefined {
+        return this.props.categoryId;
     }
 
     public get content(): RichContent {
@@ -146,6 +158,10 @@ export class Post {
         return this.props.status;
     }
 
+    public get tagIds(): EntityId[] {
+        return this.props.tagIds.map((tagId) => EntityId.create(tagId.toString()));
+    }
+
     public get title(): PostTitle {
         return this.props.title;
     }
@@ -162,6 +178,8 @@ export class Post {
             excerpt: normalizeExcerpt(props.excerpt),
             content: props.content,
             seo: props.seo,
+            ...(props.categoryId === undefined ? {} : { categoryId: props.categoryId }),
+            tagIds: props.tagIds ?? [],
             occurredAt: props.updatedAt,
             actorUserId: props.updatedByUserId,
         });
@@ -233,6 +251,8 @@ export class Post {
             excerpt: revision.excerpt,
             content: revision.content,
             seo: revision.seo,
+            ...(this.props.categoryId === undefined ? {} : { categoryId: this.props.categoryId }),
+            tagIds: this.props.tagIds,
             occurredAt: props.restoredAt,
             actorUserId: props.restoredByUserId,
         });
@@ -249,6 +269,8 @@ export class Post {
         occurredAt: UtcDateTime;
         revisionId: EntityId;
         seo: SeoMetadata;
+        categoryId?: EntityId;
+        tagIds: EntityId[];
         title: PostTitle;
     }): void {
         const revision = PostRevision.create({
@@ -261,13 +283,17 @@ export class Post {
             createdAt: props.occurredAt,
             createdByUserId: props.actorUserId,
         });
+        const { categoryId: _categoryId, ...rest } = this.props;
+        void _categoryId;
 
         this.props = {
-            ...this.props,
+            ...rest,
             title: props.title,
             excerpt: props.excerpt,
             content: props.content,
             seo: props.seo,
+            ...(props.categoryId === undefined ? {} : { categoryId: props.categoryId }),
+            tagIds: props.tagIds,
             revisions: [...this.props.revisions, revision],
             updatedAt: props.occurredAt,
         };

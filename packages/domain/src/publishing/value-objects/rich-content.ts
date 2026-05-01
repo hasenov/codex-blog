@@ -3,9 +3,9 @@ import { DomainError } from '../../shared/errors/domain-error.js';
 export type RichContentBlock =
     | { text: string; type: 'paragraph' }
     | { level: 1 | 2 | 3; text: string; type: 'heading' }
-    | { alt?: string; caption?: string; type: 'image'; url: string }
-    | { provider?: string; type: 'embed'; url: string }
-    | { code: string; language?: string; type: 'code' };
+    | { alt?: string | undefined; caption?: string | undefined; type: 'image'; url: string }
+    | { provider?: string | undefined; type: 'embed'; url: string }
+    | { code: string; language?: string | undefined; type: 'code' };
 
 export interface RichContentProps {
     blocks: RichContentBlock[];

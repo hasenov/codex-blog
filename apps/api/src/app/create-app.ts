@@ -10,6 +10,7 @@ import { createPrismaClient } from '@codex-blog/infrastructure';
 import { buildIdentityDependencies } from './build-identity-dependencies.js';
 import { buildEngagementDependencies } from './build-engagement-dependencies.js';
 import { buildPublishingDependencies, createPostRepository } from './build-publishing-dependencies.js';
+import { buildTaxonomyDependencies, createTaxonomyRepositories } from './build-taxonomy-dependencies.js';
 import { getCurrentCorrelationId } from './request-scope.js';
 import { errorHandler } from '../middleware/error-handler.js';
 import { attachRequestContext } from '../middleware/request-context.js';
@@ -41,10 +42,12 @@ export const createApp = (): CreatedApp => {
     const prisma = config.DATA_SOURCE === 'prisma' ? createPrismaClient(config.DATABASE_URL) : undefined;
     const identity = buildIdentityDependencies(config, getCurrentCorrelationId, prisma);
     const postRepository = createPostRepository(config, prisma);
-    const publishing = buildPublishingDependencies(config, prisma, postRepository);
+    const taxonomyRepositories = createTaxonomyRepositories(config, prisma);
+    const publishing = buildPublishingDependencies(config, prisma, postRepository, taxonomyRepositories);
     const engagement = buildEngagementDependencies(config, postRepository, prisma);
+    const taxonomy = buildTaxonomyDependencies(taxonomyRepositories);
 
-    app.use(config.API_PREFIX, buildV1Router(identity, publishing, engagement));
+    app.use(config.API_PREFIX, buildV1Router(identity, publishing, engagement, taxonomy));
     app.use(errorHandler);
 
     return {

@@ -23,6 +23,7 @@ export interface PostRevisionDto {
 export interface PostDto {
     archivedAt?: string;
     authorId: string;
+    categoryId?: string;
     content: RichContentDto;
     createdAt: string;
     excerpt: string;
@@ -33,6 +34,7 @@ export interface PostDto {
     seo: SeoMetadataDto;
     slug: string;
     status: PostStatus;
+    tagIds: string[];
     title: string;
     updatedAt: string;
 }

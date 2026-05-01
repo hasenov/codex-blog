@@ -12,3 +12,6 @@ export * from './shared/dto/problem-details.js';
 export * from './shared/errors/application-error.js';
 export * from './shared/ports/core.js';
 export * from './shared/ports/token-service.js';
+export * from './taxonomy/dto.js';
+export * from './taxonomy/mappers.js';
+export * from './taxonomy/use-cases.js';

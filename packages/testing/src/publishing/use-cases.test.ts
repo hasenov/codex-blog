@@ -4,13 +4,16 @@ import {
     ArchivePostUseCase,
     BadRequestError,
     ConflictError,
+    CreateCategoryUseCase,
     CreateDraftPostUseCase,
+    CreateTagUseCase,
     ForbiddenError,
     PublishPostUseCase,
     RestorePostRevisionUseCase,
     SchedulePostUseCase,
     UpdateDraftPostUseCase,
 } from '@codex-blog/application';
+import { UtcDateTime } from '@codex-blog/domain';
 
 import { createDraftInput, createPublishingTestContext } from './create-publishing-test-context.js';
 
@@ -57,6 +60,53 @@ describe('publishing use cases', () => {
 
         expect(updated.title).toBe('Updated post title');
         expect(updated.revisions).toHaveLength(2);
+    });
+
+    it('assigns active category and tags and rejects archived taxonomy', async () => {
+        const context = createPublishingTestContext();
+        const category = await new CreateCategoryUseCase(context.dependencies).execute({
+            actor: context.actor.editor,
+            name: 'Engineering',
+            slug: 'engineering',
+        });
+        const tag = await new CreateTagUseCase(context.dependencies).execute({
+            actor: context.actor.editor,
+            name: 'TypeScript',
+            slug: 'typescript',
+        });
+        const created = await new CreateDraftPostUseCase(context.dependencies).execute({
+            actor: context.actor.author,
+            ...createDraftInput({
+                slug: 'classified-post',
+            }),
+            categoryId: category.id,
+            tagIds: [tag.id],
+        });
+        const storedTag = await context.tagRepository.findById(tag.id);
+
+        if (storedTag === null) {
+            throw new Error('Expected tag to exist.');
+        }
+
+        storedTag.archive(UtcDateTime.fromISOString('2026-01-02T00:00:00.000Z'));
+        await context.tagRepository.save(storedTag);
+
+        await expect(
+            new UpdateDraftPostUseCase(context.dependencies).execute({
+                actor: context.actor.author,
+                postId: created.id,
+                title: 'Updated classified post',
+                excerpt: 'Updated excerpt',
+                content: {
+                    version: 1,
+                    blocks: [{ type: 'paragraph', text: 'Updated content' }],
+                },
+                seo: {},
+                tagIds: [tag.id],
+            })
+        ).rejects.toMatchObject({ code: 'TAG_NOT_ACTIVE' });
+        expect(created.categoryId).toBe(category.id);
+        expect(created.tagIds).toEqual([tag.id]);
     });
 
     it('enforces author ownership and reader restrictions', async () => {
