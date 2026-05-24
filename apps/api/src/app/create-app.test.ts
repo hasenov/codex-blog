@@ -6,6 +6,8 @@ import {
     authenticatedUserResponseSchema,
     commentResponseSchema,
     commentsResponseSchema,
+    mediaAssetResponseSchema,
+    mediaAssetsResponseSchema,
     paginatedPostsResponseSchema,
     postResponseSchema,
     taxonomyItemResponseSchema,
@@ -31,6 +33,14 @@ describe('createApp', () => {
         const { app } = createApp();
 
         const response = await request(app).get('/v1/health').expect(200);
+
+        expect(response.body).toEqual({ status: 'ok' });
+    });
+
+    it('returns readiness status under v1', async () => {
+        const { app } = createApp();
+
+        const response = await request(app).get('/v1/readiness').expect(200);
 
         expect(response.body).toEqual({ status: 'ok' });
     });
@@ -981,6 +991,113 @@ describe('createApp', () => {
                     .expect(409);
 
                 expect(problemDetailsSchema.parse(duplicateCategoryResponse.body).code).toBe('CATEGORY_SLUG_ALREADY_EXISTS');
+            } finally {
+                await prisma.$disconnect();
+                await created.dispose();
+            }
+        });
+    });
+
+    it('creates media assets and links them into publishing through the Prisma-backed API', async () => {
+        await withPrismaApiTestDatabase(async (databaseUrl) => {
+            const created = createApp();
+            const authorResponse = await request(created.app)
+                .post('/v1/auth/register')
+                .send({
+                    email: 'media-author@example.com',
+                    displayName: 'Media Author',
+                    password: 'secret-123',
+                })
+                .expect(201);
+            const readerResponse = await request(created.app)
+                .post('/v1/auth/register')
+                .send({
+                    email: 'media-reader@example.com',
+                    displayName: 'Media Reader',
+                    password: 'secret-123',
+                })
+                .expect(201);
+            const author = authenticatedUserResponseSchema.parse(authorResponse.body);
+            const reader = authenticatedUserResponseSchema.parse(readerResponse.body);
+            const prisma = createPrismaClient(databaseUrl);
+
+            try {
+                await prisma.user.update({
+                    where: {
+                        id: author.user.id,
+                    },
+                    data: {
+                        role: 'author',
+                    },
+                });
+
+                const authorLoginResponse = await request(created.app)
+                    .post('/v1/auth/login')
+                    .send({
+                        email: 'media-author@example.com',
+                        password: 'secret-123',
+                    })
+                    .expect(200);
+                const authorBearer = `Bearer ${authenticatedUserResponseSchema.parse(authorLoginResponse.body).tokens.accessToken}`;
+                const readerBearer = `Bearer ${reader.tokens.accessToken}`;
+
+                await request(created.app)
+                    .post('/v1/media')
+                    .set('authorization', readerBearer)
+                    .send({
+                        originalFilename: 'reader.png',
+                        mimeType: 'image/png',
+                        sizeBytes: 512,
+                        storageKey: 'media/reader.png',
+                        url: 'https://cdn.example.com/media/reader.png',
+                    })
+                    .expect(403);
+
+                const mediaResponse = await request(created.app)
+                    .post('/v1/media')
+                    .set('authorization', authorBearer)
+                    .send({
+                        originalFilename: 'hero.png',
+                        mimeType: 'image/png',
+                        sizeBytes: 1024,
+                        storageKey: 'media/hero.png',
+                        url: 'https://cdn.example.com/media/hero.png',
+                        altText: 'Hero asset',
+                    })
+                    .expect(201);
+                const media = mediaAssetResponseSchema.parse(mediaResponse.body);
+
+                expect(mediaAssetsResponseSchema.parse((await request(created.app).get('/v1/media').expect(200)).body)).toHaveLength(1);
+                expect(mediaAssetResponseSchema.parse((await request(created.app).get(`/v1/media/${media.id}`).expect(200)).body).id).toBe(media.id);
+
+                const postResponse = await request(created.app)
+                    .post('/v1/posts')
+                    .set('authorization', authorBearer)
+                    .send({
+                        title: 'Media linked post',
+                        slug: 'media-linked-post',
+                        excerpt: 'Media linked excerpt',
+                        content: {
+                            version: 1,
+                            blocks: [
+                                {
+                                    type: 'image',
+                                    assetId: media.id,
+                                    url: 'https://example.com/outdated.png',
+                                },
+                            ],
+                        },
+                        seo: {},
+                    })
+                    .expect(201);
+                const post = postResponseSchema.parse(postResponse.body);
+
+                expect(post.content.blocks[0]).toMatchObject({
+                    type: 'image',
+                    assetId: media.id,
+                    url: media.url,
+                    alt: 'Hero asset',
+                });
             } finally {
                 await prisma.$disconnect();
                 await created.dispose();

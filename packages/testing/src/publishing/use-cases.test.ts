@@ -13,7 +13,7 @@ import {
     SchedulePostUseCase,
     UpdateDraftPostUseCase,
 } from '@codex-blog/application';
-import { UtcDateTime } from '@codex-blog/domain';
+import { EntityId, MediaAsset, MimeType, OriginalFilename, StorageKey, UtcDateTime } from '@codex-blog/domain';
 
 import { createDraftInput, createPublishingTestContext } from './create-publishing-test-context.js';
 
@@ -226,5 +226,45 @@ describe('publishing use cases', () => {
         expect(updated.title).toBe('Updated post title');
         expect(restored.title).toBe('Initial post title');
         expect(restored.revisions).toHaveLength(3);
+    });
+
+    it('normalizes linked media image blocks on draft creation', async () => {
+        const context = createPublishingTestContext();
+        const asset = MediaAsset.create({
+            id: EntityId.create('media-0001'),
+            originalFilename: OriginalFilename.create('hero.png'),
+            mimeType: MimeType.create('image/png'),
+            sizeBytes: 1024,
+            storageKey: StorageKey.create('media/hero.png'),
+            url: 'https://cdn.example.com/media/hero.png',
+            createdByUserId: EntityId.create(context.actor.author.userId),
+            createdAt: UtcDateTime.fromISOString('2026-01-01T00:00:00.000Z'),
+            altText: 'Shared hero',
+        });
+        await context.mediaAssetRepository.save(asset);
+
+        const created = await new CreateDraftPostUseCase(context.dependencies).execute({
+            actor: context.actor.author,
+            ...createDraftInput({
+                slug: 'media-post',
+            }),
+            content: {
+                version: 1,
+                blocks: [
+                    {
+                        type: 'image',
+                        assetId: 'media-0001',
+                        url: 'https://example.com/outdated.png',
+                    },
+                ],
+            },
+        });
+
+        expect(created.content.blocks[0]).toMatchObject({
+            type: 'image',
+            assetId: 'media-0001',
+            url: 'https://cdn.example.com/media/hero.png',
+            alt: 'Shared hero',
+        });
     });
 });

@@ -9,6 +9,7 @@ import { createPrismaClient } from '@codex-blog/infrastructure';
 
 import { buildIdentityDependencies } from './build-identity-dependencies.js';
 import { buildEngagementDependencies } from './build-engagement-dependencies.js';
+import { buildMediaDependencies, createMediaAssetRepository } from './build-media-dependencies.js';
 import { buildPublishingDependencies, createPostRepository } from './build-publishing-dependencies.js';
 import { buildTaxonomyDependencies, createTaxonomyRepositories } from './build-taxonomy-dependencies.js';
 import { getCurrentCorrelationId } from './request-scope.js';
@@ -43,11 +44,26 @@ export const createApp = (): CreatedApp => {
     const identity = buildIdentityDependencies(config, getCurrentCorrelationId, prisma);
     const postRepository = createPostRepository(config, prisma);
     const taxonomyRepositories = createTaxonomyRepositories(config, prisma);
-    const publishing = buildPublishingDependencies(config, prisma, postRepository, taxonomyRepositories);
+    const mediaAssetRepository = createMediaAssetRepository(config, prisma);
+    const media = buildMediaDependencies(mediaAssetRepository);
+    const publishing = buildPublishingDependencies(config, prisma, postRepository, taxonomyRepositories, { mediaAssetRepository });
     const engagement = buildEngagementDependencies(config, postRepository, prisma);
     const taxonomy = buildTaxonomyDependencies(taxonomyRepositories);
 
-    app.use(config.API_PREFIX, buildV1Router(identity, publishing, engagement, taxonomy));
+    const readiness = async (): Promise<boolean> => {
+        if (prisma === undefined) {
+            return true;
+        }
+
+        try {
+            await prisma.$queryRaw`SELECT 1`;
+            return true;
+        } catch {
+            return false;
+        }
+    };
+
+    app.use(config.API_PREFIX, buildV1Router(identity, publishing, engagement, taxonomy, media, readiness));
     app.use(errorHandler);
 
     return {

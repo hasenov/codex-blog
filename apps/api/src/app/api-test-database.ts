@@ -59,6 +59,26 @@ export const createApiTestSchema = async (databaseUrl: string): Promise<void> =>
         `;
         await prisma.$executeRaw`CREATE INDEX "password_reset_tokens_userId_idx" ON "password_reset_tokens" ("userId")`;
         await prisma.$executeRaw`
+            CREATE TABLE "media_assets" (
+                "id" TEXT NOT NULL PRIMARY KEY,
+                "originalFilename" TEXT NOT NULL,
+                "mimeType" TEXT NOT NULL,
+                "sizeBytes" INTEGER NOT NULL,
+                "storageKey" TEXT NOT NULL,
+                "url" TEXT NOT NULL,
+                "altText" TEXT,
+                "caption" TEXT,
+                "status" TEXT NOT NULL,
+                "archivedAt" DATETIME,
+                "createdByUserId" TEXT NOT NULL,
+                "createdAt" DATETIME NOT NULL,
+                "updatedAt" DATETIME NOT NULL,
+                CONSTRAINT "media_assets_createdByUserId_fkey" FOREIGN KEY ("createdByUserId") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+            )
+        `;
+        await prisma.$executeRaw`CREATE INDEX "media_assets_status_idx" ON "media_assets" ("status")`;
+        await prisma.$executeRaw`CREATE INDEX "media_assets_createdByUserId_idx" ON "media_assets" ("createdByUserId")`;
+        await prisma.$executeRaw`
             CREATE TABLE "posts" (
                 "id" TEXT NOT NULL PRIMARY KEY,
                 "authorId" TEXT NOT NULL,

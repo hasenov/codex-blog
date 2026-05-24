@@ -1,9 +1,10 @@
 import { DomainError } from '../../shared/errors/domain-error.js';
+import { EntityId } from '../../shared/value-objects/entity-id.js';
 
 export type RichContentBlock =
     | { text: string; type: 'paragraph' }
     | { level: 1 | 2 | 3; text: string; type: 'heading' }
-    | { alt?: string | undefined; caption?: string | undefined; type: 'image'; url: string }
+    | { alt?: string | undefined; assetId?: string | undefined; caption?: string | undefined; type: 'image'; url: string }
     | { provider?: string | undefined; type: 'embed'; url: string }
     | { code: string; language?: string | undefined; type: 'code' };
 
@@ -38,6 +39,14 @@ const normalizeUrl = (value: string, code: string): string => {
     }
 };
 
+const normalizeOptionalEntityId = (value: string | undefined): string | undefined => {
+    if (value === undefined) {
+        return undefined;
+    }
+
+    return EntityId.create(value).toString();
+};
+
 const normalizeBlock = (block: RichContentBlock): RichContentBlock => {
     switch (block.type) {
         case 'paragraph':
@@ -54,11 +63,13 @@ const normalizeBlock = (block: RichContentBlock): RichContentBlock => {
         case 'image': {
             const alt = normalizeOptionalText(block.alt, 240, 'INVALID_RICH_CONTENT_IMAGE_ALT');
             const caption = normalizeOptionalText(block.caption, 500, 'INVALID_RICH_CONTENT_IMAGE_CAPTION');
+            const assetId = normalizeOptionalEntityId(block.assetId);
 
             return {
                 type: 'image',
                 url: normalizeUrl(block.url, 'INVALID_RICH_CONTENT_IMAGE_URL'),
                 ...(alt === undefined ? {} : { alt }),
+                ...(assetId === undefined ? {} : { assetId }),
                 ...(caption === undefined ? {} : { caption }),
             };
         }

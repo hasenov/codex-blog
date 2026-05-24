@@ -16,6 +16,7 @@ export const richContentHeadingBlockSchema = z.object({
 export const richContentImageBlockSchema = z.object({
     type: z.literal('image'),
     url: z.string().url(),
+    assetId: z.string().min(1).optional(),
     alt: z.string().min(1).max(240).optional(),
     caption: z.string().min(1).max(500).optional(),
 });

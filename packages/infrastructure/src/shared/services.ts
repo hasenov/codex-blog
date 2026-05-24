@@ -180,6 +180,20 @@ export class NoopLogger implements Logger {
     }
 }
 
+export class JsonConsoleLogger implements Logger {
+    public info(message: string, metadata?: Readonly<Record<string, string>>): void {
+        console.info(JSON.stringify({ level: 'info', message, ...(metadata === undefined ? {} : { metadata }) }));
+    }
+
+    public warn(message: string, metadata?: Readonly<Record<string, string>>): void {
+        console.warn(JSON.stringify({ level: 'warn', message, ...(metadata === undefined ? {} : { metadata }) }));
+    }
+
+    public error(message: string, metadata?: Readonly<Record<string, string>>): void {
+        console.error(JSON.stringify({ level: 'error', message, ...(metadata === undefined ? {} : { metadata }) }));
+    }
+}
+
 export class StaticCorrelationIdProvider implements CorrelationIdProvider {
     public constructor(private readonly correlationId: string) {}
 

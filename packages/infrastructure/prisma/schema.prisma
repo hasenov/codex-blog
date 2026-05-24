@@ -17,15 +17,38 @@ model User {
     createdAt    DateTime
     updatedAt    DateTime
 
-    sessions        Session[]
-    securityEvents  SecurityEvent[]
-    passwordResets  PasswordResetToken[]
-    authoredPosts   Post[]         @relation("PostAuthor")
-    postRevisions   PostRevision[] @relation("PostRevisionCreator")
-    comments        Comment[]      @relation("CommentAuthor")
+    sessions          Session[]
+    securityEvents    SecurityEvent[]
+    passwordResets    PasswordResetToken[]
+    authoredPosts     Post[]         @relation("PostAuthor")
+    postRevisions     PostRevision[] @relation("PostRevisionCreator")
+    comments          Comment[]      @relation("CommentAuthor")
     moderatedComments Comment[]    @relation("CommentModerator")
+    mediaAssets       MediaAsset[]  @relation("MediaAssetCreator")
 
     @@map("users")
+}
+
+model MediaAsset {
+    id               String   @id
+    originalFilename String
+    mimeType         String
+    sizeBytes        Int
+    storageKey       String
+    url              String
+    altText          String?
+    caption          String?
+    status           String
+    archivedAt       DateTime?
+    createdByUserId  String
+    createdAt        DateTime
+    updatedAt        DateTime
+
+    createdBy User @relation("MediaAssetCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
+
+    @@index([status])
+    @@index([createdByUserId])
+    @@map("media_assets")
 }
 
 model Post {

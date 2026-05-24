@@ -2,7 +2,7 @@ import type { Clock, IdGenerator, PostDto } from '@codex-blog/application';
 import { Post, type ListPublishedPostsOptions, type PostRepository, type Slug } from '@codex-blog/domain';
 
 import { InMemoryTransactionManager } from '@codex-blog/infrastructure';
-import { InMemoryCategoryRepository, InMemoryTagRepository } from '@codex-blog/infrastructure';
+import { InMemoryCategoryRepository, InMemoryMediaAssetRepository, InMemoryTagRepository } from '@codex-blog/infrastructure';
 
 export class InMemoryPostRepository implements PostRepository {
     private readonly posts = new Map<string, Post>();
@@ -71,6 +71,7 @@ export const createPublishingTestContext = () => {
     const clock = new FixedClock();
     const postRepository = new InMemoryPostRepository();
     const categoryRepository = new InMemoryCategoryRepository();
+    const mediaAssetRepository = new InMemoryMediaAssetRepository();
     const tagRepository = new InMemoryTagRepository();
 
     return {
@@ -86,10 +87,12 @@ export const createPublishingTestContext = () => {
             clock,
             categoryRepository,
             idGenerator: new SequenceIdGenerator(),
+            mediaAssetRepository,
             postRepository,
             tagRepository,
             transactionManager: new InMemoryTransactionManager(),
         },
+        mediaAssetRepository,
         postRepository,
         tagRepository,
     };

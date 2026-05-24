@@ -15,6 +15,7 @@ import {
     type PostRepository,
     type CategoryRepository,
     type TagRepository,
+    type MediaAssetRepository,
 } from '@codex-blog/domain';
 
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from '../shared/errors/application-error.js';
@@ -25,6 +26,7 @@ import { toPostDto, toPostRevisionDto } from './mappers.js';
 interface PublishingUseCaseDependencies {
     clock: Clock;
     idGenerator: IdGenerator;
+    mediaAssetRepository?: MediaAssetRepository;
     postRepository: PostRepository;
     categoryRepository?: CategoryRepository;
     tagRepository?: TagRepository;
@@ -100,6 +102,41 @@ const buildEditableContent = (input: {
     seo: SeoMetadata.create(input.seo),
 });
 
+const resolveMediaLinkedContent = async (
+    repository: MediaAssetRepository | undefined,
+    content: RichContentDto
+): Promise<RichContentDto> => {
+    if (repository === undefined) {
+        return content;
+    }
+
+    const blocks = await Promise.all(
+        content.blocks.map(async (block) => {
+            if (block.type !== 'image' || block.assetId === undefined) {
+                return block;
+            }
+
+            const asset = await repository.findById(block.assetId);
+
+            if (asset === null || asset.status !== 'active') {
+                throw new BadRequestError('Referenced media asset was not found.', 'MEDIA_ASSET_NOT_FOUND');
+            }
+
+            return {
+                ...block,
+                url: asset.url,
+                ...(block.alt === undefined && asset.altText !== undefined ? { alt: asset.altText } : {}),
+                ...(block.caption === undefined && asset.caption !== undefined ? { caption: asset.caption } : {}),
+            };
+        })
+    );
+
+    return {
+        ...content,
+        blocks,
+    };
+};
+
 const uniqueIds = (ids: string[]): string[] => Array.from(new Set(ids));
 
 const resolveCategoryId = async (
@@ -171,7 +208,10 @@ export class CreateDraftPostUseCase {
                 }
 
                 const now = UtcDateTime.create(this.dependencies.clock.now());
-                const editable = buildEditableContent(input);
+                const editable = buildEditableContent({
+                    ...input,
+                    content: await resolveMediaLinkedContent(this.dependencies.mediaAssetRepository, input.content),
+                });
                 const categoryId = await resolveCategoryId(this.dependencies.categoryRepository, input.categoryId);
                 const tagIds = await resolveTagIds(this.dependencies.tagRepository, input.tagIds);
                 const post = Post.createDraft({
@@ -206,7 +246,10 @@ export class UpdateDraftPostUseCase {
                 const post = await findPostOrThrow(this.dependencies.postRepository, input.postId);
                 assertCanUpdateDraftPost(input.actor, post);
                 const now = UtcDateTime.create(this.dependencies.clock.now());
-                const editable = buildEditableContent(input);
+                const editable = buildEditableContent({
+                    ...input,
+                    content: await resolveMediaLinkedContent(this.dependencies.mediaAssetRepository, input.content),
+                });
                 const categoryId = await resolveCategoryId(this.dependencies.categoryRepository, input.categoryId);
                 const tagIds = await resolveTagIds(this.dependencies.tagRepository, input.tagIds);
 

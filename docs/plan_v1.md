@@ -1,5 +1,12 @@
 # Blog Platform Backend Foundation
 
+## Current Status
+
+- `identity`, `publishing`, `engagement`, and `taxonomy` are implemented as end-to-end backend slices through domain, application, infrastructure, and `/v1` API routes.
+- `media` foundation is implemented as metadata-first backend support with `/v1/media` endpoints and publishing image block linkage through optional `assetId`.
+- Current Prisma datasource remains SQLite for local development and tests. PostgreSQL is still a follow-up target rather than the current checked-in runtime.
+- Publishing currently exposes `archive` as the external lifecycle endpoint instead of `unpublish`.
+
 ## Summary
 
 Собираем `backend-first` monorepo на `Turborepo` с жесткой ставкой на `TypeScript`, `Clean Architecture`, `SOLID`, `DRY`, отсутствие `any`, unit-тесты на всю бизнес-логику и готовность к будущему `Next.js` frontend без переработки домена.  

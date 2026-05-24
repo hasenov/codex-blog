@@ -72,5 +72,7 @@ pnpm db:migrate:deploy
 ## Notes
 
 -   Public API routes are versioned under `/v1`.
+-   `GET /v1/health` and `GET /v1/readiness` are available for runtime probes.
+-   Media metadata assets are available under `/v1/media` and can be referenced from publishing image blocks via optional `assetId`.
 -   Environment variables must be accessed through typed config.
 -   Keep business rules in domain or application code and cover branching behavior with unit tests.
